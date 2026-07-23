@@ -1,0 +1,55 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Secrets ---
+# .env.example is the committed template; the real .env never is.
+.env
+.env.*
+!.env.example
+*.pem
+secrets/
+
+# --- Airflow ---
+logs/
+airflow.db
+airflow.cfg
+airflow-webserver.pid
+standalone_admin_password.txt
+
+# --- Docker volumes / local data ---
+data/
+postgres-data/
+minio-data/
+tmp/
+
+# --- Monitoring local state ---
+monitoring/grafana/data/
+monitoring/prometheus/data/
+
+# --- Model cache ---
+# sentence-transformers downloads all-MiniLM-L6-v2 on first use
+.hf_cache/
+.cache/
+
+# --- Trivy ---
+.trivycache/
+trivy-results*.json
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
