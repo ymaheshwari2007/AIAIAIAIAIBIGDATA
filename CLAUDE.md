@@ -2,6 +2,16 @@
 
 Project context for Claude Code. Read this before doing anything in this repo.
 
+Every decision recorded here was made by the owners. Do not add, swap, or "improve" any tool, library, port, or convention on your own. If something isn't covered here, it is an OPEN decision: propose options and wait for the owners to choose. See the Decision Log.
+
+---
+
+## HARD RULE: explain before you touch anything
+
+Before creating or editing ANY file, first say, in plain language, what the change does and why. Then make it. No silent edits, ever, no matter how small. One combined explanation for a batch of related edits is fine, but nothing gets written that the owners didn't see explained first.
+
+This exists because the owners make every decision on this project. If you catch yourself about to write a choice into a file that the owners didn't explicitly make, stop and ask instead.
+
 ---
 
 ## What this project is
@@ -12,55 +22,66 @@ Think "scoped-down Snyk, built to learn the architecture." It is not a product, 
 
 ---
 
-## IMPORTANT: this is a learning project, work accordingly
+## Learning project: how to work here
 
-Two rising sophomores are building this to learn data engineering and applied AI. If you write all the code, the project fails at its actual purpose even if the code works.
+Two rising sophomores are building this to learn data engineering and applied AI. If you write all the code, the project fails at its purpose even if the code works.
 
-**Default working mode:**
 - Explain the approach and the tradeoffs BEFORE writing code, and wait for a go-ahead on anything non-trivial.
-- Prefer scaffolding over finished implementations: correct structure, clear function signatures, docstrings explaining what goes where, and `TODO` markers for the interesting logic. Let us fill in the core logic ourselves.
-- When you do write a full implementation (fine for boilerplate, config, Dockerfiles, glue), explain the parts that are new to us, especially anything Airflow-specific, pgvector-specific, or Prometheus-specific.
-- When there are several reasonable ways to do something, say so and give a recommendation with a reason. Do not silently pick one.
-- If we ask for something that's a bad idea, say so directly. Do not just build it.
+- Prefer scaffolding over finished implementations: correct structure, clear function signatures, docstrings, and `TODO` markers for the interesting logic. Let us fill in the core logic.
+- When you write a full implementation (fine for config, Dockerfiles, glue), explain the parts new to us, especially anything Airflow-, SQLAlchemy-, Alembic-, pgvector-, or Prometheus-specific.
+- When there are several reasonable ways to do something, present them with a recommendation and reason. Do not silently pick one. The owners make the call.
+- If we ask for a bad idea, say so directly.
 
-**Full autonomous implementation is fine for:** config files, Docker/compose setup, test fixtures, type hints, docstrings, refactors we explicitly ask for, and debugging errors we're stuck on.
+Full autonomous implementation is fine for: config files, Docker/compose setup, test fixtures, type hints, docstrings, refactors we ask for, and debugging errors we're stuck on. Even then, the HARD RULE above applies: explain first.
 
-**Stop and ask us first for:** database schema changes, adding a new dependency or service to the stack, changing the agent's prompt strategy, and anything that touches more than about three files.
+Stop and ask before: schema changes, adding any new dependency/service/tool, changing the agent's prompt strategy, deciding anything marked OPEN or DEFERRED below, and anything touching more than ~3 files.
+
+---
+
+## Decision Log
+
+Everything here was chosen by the owners. This is the source of truth.
+
+**DECIDED:**
+- Project: DepWatch, a vulnerability intelligence tool
+- Language: Python
+- Orchestration: Apache Airflow 3.x
+- Executor: LocalExecutor (tasks run in the scheduler; no Redis, no separate worker)
+- Database: one Postgres container holding two databases, `airflow` (metadata) and `depwatch` (app data)
+- Postgres image: `pgvector/pgvector:pg16` from the start (vector extension available, switched on later at Stage 3)
+- Vector store: pgvector, inside the `depwatch` database (not a separate vector DB)
+- DB access layer: SQLAlchemy Core (not the ORM)
+- Migrations: Alembic
+- Raw storage: MinIO (S3-compatible object storage), the raw landing zone for untouched API responses
+- Airflow UI port: 8080 (default)
+- Data sources: GitHub Security Advisories (GHSA) + OSV.dev as primary, NVD as enrichment
+- Observability tools: Prometheus + Grafana (specific dashboards/metrics deferred, see below)
+- Trivy: validation benchmark and container scanner ONLY, never the matching engine
+- Packaging: Docker Compose, built up incrementally (add a service only when the current stage needs it)
+
+**OPEN (not yet decided, ask the owners before acting):**
+- Nothing outstanding right now. If a new fork appears, it lands here until the owners decide.
+
+**DEFERRED (decide when we reach the stage, not before):**
+- Embedding model (Stage 3): local free model vs paid API
+- Agent framework (Stage 4): raw SDK loop vs a framework like LangGraph
+- Database schema (Stage 2): the owners drive the design
+- Which metrics and dashboards (Stage 5)
 
 ---
 
 ## Architecture
 
 ```
-  sources                 ingest              store                index            reason              observe
-┌──────────────┐      ┌───────────┐      ┌────────────┐      ┌───────────┐    ┌────────────┐    ┌────────────┐
-│ GHSA API     │─────▶│           │─────▶│ MinIO      │      │           │    │            │    │            │
-│ OSV.dev dump │─────▶│  Airflow  │      │ (raw JSON) │      │ pgvector  │───▶│ LLM agent  │───▶│  Grafana   │
-│ NVD API      │─────▶│   DAGs    │─────▶│ Postgres   │─────▶│  index    │    │  + memory  │    │ Prometheus │
-└──────────────┘      └───────────┘      │ (clean)    │      └───────────┘    └────────────┘    └────────────┘
-                                          └────────────┘                             │                  ▲
-                                                                                      └──── findings ────┘
+  sources              ingest            store              index            reason            observe
+  GHSA API      ->                ->     MinIO (raw)
+  OSV.dev dump  ->     Airflow           Postgres     ->    pgvector    ->   LLM agent   ->    Grafana
+  NVD API       ->     DAGs        ->    (depwatch db)      index            + memory          Prometheus
+                                                                                 |                ^
+                                                                                 +-- findings ----+
 ```
 
-Flow in words: Airflow DAGs pull advisories daily, land raw JSON in MinIO and normalized rows in Postgres, embed advisory text into pgvector, then the agent takes a project's dependency file, retrieves relevant advisories, reasons about real impact, and writes findings plus per-project memory back to Postgres. Everything emits Prometheus metrics that Grafana renders.
-
----
-
-## Stack (decided, do not change without asking)
-
-| Layer | Choice | Why |
-|---|---|---|
-| Language | Python 3.13 | Airflow's native language |
-| Orchestration | Apache Airflow 2.x (official Docker image) | Real scheduled multi-step workflows with retries and backfills |
-| Relational store | Postgres 16 | Normalized advisories, projects, findings, memory |
-| Vector store | pgvector extension on the same Postgres | Keeps the stack to one database, one less service to run |
-| Object storage | MinIO (S3-compatible, local) | Raw JSON landing zone, teaches the lake pattern without AWS billing |
-| Embeddings | `sentence-transformers`, `all-MiniLM-L6-v2` (384 dims, CPU, free) | No API key, no cost, good enough for advisory text |
-| LLM | Anthropic API via the `anthropic` SDK | Model configurable via env var, cheaper/faster model for bulk triage |
-| Metrics | Prometheus | Scrapes every component |
-| Dashboards | Grafana | Two dashboards: system health, security posture |
-| Packaging | Docker Compose | `docker compose up` brings up the whole platform |
-| Deps | `requirements.txt`, pinned versions | Matches Airflow's Docker image conventions |
+Airflow DAGs pull advisories daily, land raw JSON in MinIO and normalized rows in Postgres (via SQLAlchemy Core), embed advisory text into pgvector, then the agent takes a project's dependency file, retrieves relevant advisories, reasons about real impact, and writes findings plus per-project memory back to Postgres. Everything emits Prometheus metrics that Grafana renders.
 
 ---
 
@@ -68,145 +89,153 @@ Flow in words: Airflow DAGs pull advisories daily, land raw JSON in MinIO and no
 
 ```
 depwatch/
-├── docker-compose.yml
-├── .env.example              # every env var, with fake values. NEVER commit .env
-├── dags/                     # Airflow DAGs, thin orchestration only
-│   ├── ingest_ghsa.py
-│   ├── ingest_osv.py
-│   ├── enrich_nvd.py
-│   └── embed_advisories.py
-├── depwatch/                 # the actual library, importable and testable
-│   ├── sources/              # one client per data source
-│   ├── transform/            # normalization into our schema
-│   ├── storage/              # Postgres + MinIO access
-│   ├── embedding/            # embedding + vector search
-│   ├── agent/                # retrieval, prompts, triage loop, memory
-│   └── metrics/              # Prometheus instrumentation
-├── sql/                      # schema migrations, numbered, forward-only
-├── monitoring/               # prometheus.yml, grafana dashboards as JSON
-├── tests/
-└── projects/                 # dependency files of the repos we watch
+|-- docker-compose.yaml       # grows over time; only services the current stage uses
+|-- Dockerfile                # custom Airflow image (added at Stage 1 when DAGs need our libs)
+|-- .env.example              # every env var with fake values. NEVER commit .env
+|-- alembic/                  # Alembic migration environment + versions
+|-- alembic.ini
+|-- dags/                     # Airflow DAGs, thin orchestration only
+|-- depwatch/                 # the importable, testable library
+|   |-- config.py             # all env vars read once, here
+|   |-- sources/              # one client per data source
+|   |-- transform/            # normalization + multi-source merge
+|   |-- storage/              # Postgres (SQLAlchemy Core) + MinIO access
+|   |-- embedding/            # embedding + vector search (Stage 3)
+|   |-- agent/                # retrieval, prompts, triage loop, memory (Stage 4)
+|   +-- metrics/              # Prometheus instrumentation (Stage 5)
+|-- monitoring/               # prometheus.yml, grafana dashboards (Stage 5)
+|-- tests/
++-- projects/                 # dependency files of the repos we watch
 ```
 
-**Rule: DAGs stay thin.** A DAG file wires tasks together and handles scheduling. All real logic lives in `depwatch/` so it can be unit tested without spinning up Airflow. If a DAG file is over about 60 lines of logic, it's in the wrong place.
+Thin DAGs: a DAG file wires tasks together and schedules them. All real logic lives in `depwatch/` so it can be unit-tested without spinning up Airflow. If a DAG file is accumulating real logic, it belongs in the library instead.
+
+---
+
+## Docker Compose: build it up, don't front-load it
+
+Add each service only when the stage that uses it arrives.
+
+- Stage 0/1: Postgres (on the pgvector image) and the Airflow 3.x LocalExecutor services (api-server, scheduler, dag-processor, triggerer, init). No Redis, no worker, no Flower.
+- MinIO: added when we start landing raw JSON.
+- Prometheus + Grafana: added at Stage 5.
 
 ---
 
 ## Data sources (verified, use these exact facts)
 
-**GitHub Security Advisories, primary.**
-`GET https://api.github.com/advisories` with `Accept: application/vnd.github+json`. Works unauthenticated at 60 req/hour, 5000 req/hour with a free personal access token. Paginate via the `Link` header. Gives us `ghsa_id`, `cve_id`, `severity`, `summary`, `description`, `vulnerabilities[]` with package ecosystem, name, vulnerable version range, and first patched version. This is the richest source for our use case because it's keyed by package, which is exactly how we look things up.
+**GitHub Security Advisories, primary.** `GET https://api.github.com/advisories` with `Accept: application/vnd.github+json`. 60 req/hour unauthenticated, 5000 with a free token. Paginate via the `Link` header. Gives `ghsa_id`, `cve_id`, `severity`, `summary`, `description`, and `vulnerabilities[]` with ecosystem, package name, vulnerable range, and first patched version. Use `ghsa_id` as `source_id`, `source = 'github'`.
 
-**OSV.dev, primary.**
-Bulk zip dumps at `https://storage.googleapis.com/osv-vulnerabilities/{ECOSYSTEM}/all.zip` (for example `PyPI`, `npm`, `Go`, `Maven`), refreshed daily. There's also a query API at `https://api.osv.dev/v1/query` and a batch endpoint. Prefer the bulk zips for ingestion since a file can't rate-limit you. Records follow the OSV schema, which is well documented and stable.
+**OSV.dev, primary.** Bulk zip dumps at `https://storage.googleapis.com/osv-vulnerabilities/{ECOSYSTEM}/all.zip` (e.g. `PyPI`, `npm`, `Go`, `Maven`), refreshed daily. Prefer the bulk zips over the query API since a file can't rate-limit you. Use OSV's `id` as `source_id`, `source = 'osv'`.
 
-**NVD, enrichment only.**
-`https://services.nvd.nist.gov/rest/json/cves/2.0`. Free API key from `https://nvd.nist.gov/developers/request-an-api-key`. Rate limits are 5 requests per rolling 30 seconds without a key, 50 with one, so sleep between requests. Use the `lastModStartDate` / `lastModEndDate` params for incremental syncs, which is NIST's own recommended pattern. We use NVD for CVSS scores and extra references, keyed by CVE ID.
+**NVD, enrichment only.** `https://services.nvd.nist.gov/rest/json/cves/2.0`. Free API key. Limits: 5 requests / 30s without a key, 50 with one, so sleep between requests. Use `lastModStartDate` / `lastModEndDate` for incremental syncs. Use the CVE id as `source_id`, `source = 'nvd'`. NVD is keyed by CPE strings, which are painful to match against a package.json, which is why it's enrichment (CVSS scores, extra references), not primary.
 
-**Why NVD is not primary:** it identifies software with CPE strings, which are painful to match against a `package.json`. GHSA and OSV are keyed by package name and version range directly. Merging all three also gives us a genuine multi-source reconciliation problem to solve, which is the point.
+**Never fabricate advisory data.** For test data, use a real record or clearly name the fixture `FAKE_ADVISORY_FOR_TESTS`.
 
-**Never fabricate advisory data.** If you need example data for a test, either use a real record pulled from the API or clearly name the fixture something like `FAKE_ADVISORY_FOR_TESTS`. Made-up CVE IDs that look real are a trap for us later.
+---
+
+## Ingestion must be idempotent
+
+Re-running any pull must never duplicate rows. Airflow retries tasks, incremental pulls overlap at the edges, and we trigger DAGs by hand constantly, so every advisory can arrive many times.
+
+- Every advisory row's identity is the pair `(source, source_id)`, with a UNIQUE constraint on that pair.
+- Writes are upserts: `INSERT ... ON CONFLICT (source, source_id) DO UPDATE SET <mutable fields>, updated_at = now()`. In SQLAlchemy Core this is the Postgres `insert(...).on_conflict_do_update(...)`.
+- The pair, not the bare id, is the key on purpose: the same CVE appears in GHSA, OSV, and NVD, and keying on `source_id` alone would make those copies overwrite each other. Keeping `source` in the key lets each source hold its own row, which the merge step reconciles later.
+- Keep `created_at` fixed on update; only refresh `updated_at` and the mutable fields.
 
 ---
 
 ## Trivy: benchmark, not engine
 
-Trivy is in this project as a **validation baseline and container scanner**, never as the core matching engine. Building our own ingestion and matching is the entire point of phases 1 and 2.
+Trivy is a validation baseline and container scanner ONLY. Building our own ingestion and matching is the point of Stages 1 and 3.
 
-Approved uses:
-- Run `trivy fs` against a watched repo, diff its findings against ours, and report agreement/disagreement. This is our eval harness.
-- Run `trivy image` against our own service images for container-layer coverage our dependency-file pipeline doesn't have.
-- Later (phase 3+ only), feed Trivy output into the agent as a second signal source alongside our own matcher.
+- Run `trivy fs` on a watched repo and diff its findings against ours: this is our eval harness.
+- Run `trivy image` on our own service images for container-layer coverage.
+- Later (Stage 4+) it may feed the agent as a second signal.
 
-If you ever find yourself suggesting "just call Trivy here" in place of our own retrieval or matching logic, stop and flag it instead.
+If you're ever about to suggest "just call Trivy here" in place of our own retrieval or matching, stop and flag it.
 
 ---
 
 ## Database conventions
 
-- Table names plural and snake_case: `advisories`, `projects`, `dependencies`, `findings`, `agent_memory`, `raw_ingest_log`.
-- Every table gets `created_at timestamptz default now()` and, where mutable, `updated_at`.
-- Advisories carry `source` and `source_id` with a unique constraint on the pair, so re-ingesting is safe.
-- Embedding column is `vector(384)` to match `all-MiniLM-L6-v2`. If we swap models, the dimension changes and needs a migration.
-- Migrations live in `sql/` as numbered forward-only files (`001_init.sql`, `002_add_findings.sql`). No ORM, plain SQL, so we actually learn it.
+- Plural snake_case table names: `advisories`, `projects`, `dependencies`, `findings`, `agent_memory`, `raw_ingest_log`.
+- Every table gets `created_at timestamptz default now()`, and `updated_at` where mutable.
+- Advisories carry `source` and `source_id` with a UNIQUE constraint on the pair (see idempotency above). A plain auto-increment `id` can serve as the primary key alongside it.
+- Schema changes go through Alembic migrations. Do not hardcode the pgvector embedding dimension until we pick the embedding model at Stage 3.
+- The schema itself is the owners' to design (Stage 2). Propose and advise; do not finalize tables on your own.
 
 ## Airflow conventions
 
-- **Every DAG must be idempotent.** Re-running any task for any date must not duplicate rows. Use upserts keyed on `(source, source_id)`.
-- Incremental by default, using a watermark of the last successful run. Full refresh only as an explicitly triggered separate DAG.
-- Set `retries` and `retry_delay` on every task that touches a network. These APIs are occasionally flaky and handling that is a feature of the project, not a bug.
-- Tasks log counts (fetched, inserted, updated, skipped) and export them as Prometheus metrics.
-- No secrets in DAG code. Everything through env vars or Airflow connections.
-
-## Agent conventions
-
-- Agent output must be **structured**, a typed finding object, not a wall of prose. Fields at minimum: package, installed version, advisory ID, severity, our assessed urgency, affected (yes/no/unsure), reasoning, recommended action.
-- Memory is per project and per advisory. On each run, look up prior findings first, so the agent can say "still unpatched, day 12" and remember prior calls like "assessed not reachable, because we never call the affected function."
-- Prompts live in versioned files under `depwatch/agent/prompts/`, not inline in code, so we can diff them when quality changes.
-- Log every LLM call's token usage and cost to Postgres. It feeds a Grafana panel and keeps us honest about spend.
-- The agent must be allowed to say "I'm not sure." A confident wrong triage is worse than an unsure one.
+- Every DAG idempotent. Re-running any task must not duplicate rows (upsert on `(source, source_id)`).
+- Incremental by default using a last-successful-run watermark. Full refresh only as a separate, explicitly triggered DAG.
+- `retries` and `retry_delay` on every network task; these APIs are flaky and handling that is a feature.
+- Tasks log counts (fetched, inserted, updated, skipped) and export them as Prometheus metrics (Stage 5).
+- No secrets in DAG code; use env vars or Airflow connections.
 
 ## Code conventions
 
-- Type hints on all function signatures. `ruff` for linting and formatting.
-- Small pure functions in `transform/`, tested with plain pytest. No test needs Docker running.
-- Config via env vars, read once in one place (`depwatch/config.py`), never scattered `os.getenv` calls.
-- Comments explain *why*, not *what*.
+- Type hints on all signatures. `ruff` for lint + format.
+- Small pure functions in `transform/`, tested with plain pytest; no test should need Docker.
+- Config via env vars, read once in `depwatch/config.py`.
+- Comments explain why, not what.
 
 ---
 
 ## Commands
 
 ```bash
-docker compose up -d              # bring up the whole platform
+docker compose up airflow-init      # first-time: run migrations + create the airflow/airflow login
+docker compose up -d                # bring up whatever services exist so far
 docker compose logs -f airflow-scheduler
-make migrate                      # apply sql/ migrations in order
-make test                         # pytest
-make lint                         # ruff check + format
-make dag-test DAG=ingest_ghsa     # run one DAG locally without the scheduler
-trivy fs projects/impacttrail     # baseline scan for comparison
+alembic revision --autogenerate -m "message"   # create a migration
+alembic upgrade head                # apply migrations to the depwatch db
+pytest                              # tests
+ruff check . && ruff format .       # lint + format
+trivy fs projects/impacttrail       # baseline scan for comparison
 ```
 
-Airflow UI at `localhost:8080`, Grafana at `localhost:3000`, MinIO console at `localhost:9001`.
+Airflow UI at `localhost:8080` (login `airflow` / `airflow`). Grafana at `localhost:3000` and MinIO console at `localhost:9001` once those services exist.
 
 ---
 
-## Roadmap and current phase
+## Roadmap
 
-**Phase 1, data spine (weeks 1-3). CURRENT PHASE.**
-Airflow DAGs for GHSA and OSV, raw landing in MinIO, normalized rows in Postgres, NVD enrichment. Done when fresh advisories land daily with no human involvement and re-runs don't duplicate anything.
+Grouped as three phases across six stages. **Currently: Phase 1.**
 
-**Phase 2, AI layer (weeks 3-6).**
-Embeddings into pgvector, retrieval, the agent triage loop, structured findings, per-project memory. Done when pointing it at one of our repos produces a report that makes sense to a human.
+**Phase 1, data spine (Stages 0-2). CURRENT.**
+- Stage 0: minimal compose (Postgres + Airflow LocalExecutor services), config, a hello-world DAG that runs green, Alembic set up.
+- Stage 1: DAGs for GHSA and OSV, raw landing in MinIO, normalized rows in Postgres via SQLAlchemy Core, NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
+- Stage 2: design the Postgres schema (the owners drive).
 
-**Phase 3, observability (weeks 6-8).**
-Prometheus instrumentation everywhere, two Grafana dashboards (system health, security posture). Done when one dashboard shows the whole system alive.
+**Phase 2, AI layer (Stages 3-4).**
+- Stage 3: pick the embedding model, embed into pgvector, build metadata-filtered retrieval (filter by ecosystem/package, then vector rank).
+- Stage 4: pick the agent framework, build the triage loop, structured findings, per-project memory. Done when pointing it at one of our repos gives a report that makes sense.
 
-**Stretch, only after phase 3.** Web UI, Discord notifications, reachability analysis against actual source code, CI integration, Trivy as a second signal.
+**Phase 3, observability (Stage 5).**
+- Prometheus instrumentation everywhere, Grafana dashboards. The owners pick the metrics. Done when one dashboard shows the whole system alive.
 
-**Do not build ahead.** If we're in phase 1 and you're tempted to add an agent call or a Grafana panel, don't. Flag it as a phase 2/3 item instead. Scope creep is the single most likely way this project dies.
+**Stage 6, validation.** Trivy diff harness + container scanning, once there are findings to compare.
+
+Do not build ahead of the current stage. Flag later ideas instead of building them. Scope creep is the most likely way this project dies.
 
 ---
 
 ## Watched projects
 
-`projects/` holds the dependency files of the repos DepWatch monitors. First targets are our own: ImpactTrail and Rainfall. Start with one, get it fully working end to end, then add the second.
-
----
+`projects/` holds the dependency files of the repos DepWatch monitors. First targets: ImpactTrail and Rainfall. Get ImpactTrail working end to end first, then add Rainfall.
 
 ## Non-goals
 
-- Not multi-tenant, no auth, no user accounts.
-- Not real time. Daily is fine, and daily is what the sources publish anyway.
-- Not big data by volume. We design with the patterns (partitioning, idempotency, raw vs. curated) at small scale, deliberately.
-- Not trying to beat Dependabot or Snyk. Prior art exists and that's fine, it means the problem is real.
+- No multi-tenant, auth, or user accounts.
+- Not real time; daily is fine and matches the sources.
+- Not big data by volume; we practice the patterns (idempotency, raw vs. curated, partitioning) at small scale on purpose.
+- Not trying to beat Dependabot or Snyk; prior art existing means the problem is real.
 
 ## Definition of done for any task
 
 1. It runs.
 2. It's idempotent if it writes data.
 3. It has a test if it contains logic.
-4. It emits a metric if it's a pipeline step.
+4. It emits a metric if it's a pipeline step (from Stage 5 on).
 5. Both of us could explain the design choice in an interview without hand-waving.
-
-If a change can't clear all five, say so before we merge it.
