@@ -23,7 +23,7 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     PYTHONPATH: '/opt/airflow'          # so DAGs can `import depwatch`
-    DEPWATCH_DATABASE_URL: "postgresql://${DEPWATCH_DB_USER:-depwatch}:${DEPWATCH_DB_PASSWORD:-root}@postgres:5432/${DEPWATCH_DB_NAME:-depwatch}"
+    DEPWATCH_DATABASE_URL: "postgresql://${DEPWATCH_DB_USER:-depwatch}:${DEPWATCH_DB_PASSWORD:-root}@appdb:5432/${DEPWATCH_DB_NAME:-depwatch}"
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -37,23 +37,35 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  # Airflow's metadata. We never hand-connect to it, so no host port.
   postgres:
-    image: pgvector/pgvector:pg16       # pg16 + vector extension (used from Stage 3)
+    image: postgres:16
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-      # read by the init script to create the second database
-      DEPWATCH_DB_USER: ${DEPWATCH_DB_USER:-depwatch}
-      DEPWATCH_DB_PASSWORD: ${DEPWATCH_DB_PASSWORD:-root}
-      DEPWATCH_DB_NAME: ${DEPWATCH_DB_NAME:-depwatch}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-      - ./docker/postgres-initdb:/docker-entrypoint-initdb.d:ro   # creates the depwatch db on first boot
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Our app data. pgvector for the embeddings we add at Stage 3.
+  appdb:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${DEPWATCH_DB_USER:-depwatch}
+      POSTGRES_PASSWORD: ${DEPWATCH_DB_PASSWORD:-root}
+      POSTGRES_DB: ${DEPWATCH_DB_NAME:-depwatch}
+    ports:
+      - "5432:5432"                     # localhost:5432 -> this one (for Alembic/psql)
+    volumes:
+      - appdb-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DEPWATCH_DB_USER:-depwatch}"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -162,3 +174,4 @@ services:
 
 volumes:
   postgres-db-volume:
+  appdb-volume:

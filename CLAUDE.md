@@ -47,8 +47,8 @@ Everything here was chosen by the owners. This is the source of truth.
 - Language: Python
 - Orchestration: Apache Airflow 3.x
 - Executor: LocalExecutor (tasks run in the scheduler; no Redis, no separate worker)
-- Database: one Postgres container holding two databases, `airflow` (metadata) and `depwatch` (app data)
-- Postgres image: `pgvector/pgvector:pg16` from the start (vector extension available, switched on later at Stage 3)
+- Database: two Postgres containers — `postgres` (Airflow metadata) and `appdb` (our `depwatch` app data). Kept separate so resetting our schema never disturbs Airflow.
+- Postgres images: app DB (`appdb`) on `pgvector/pgvector:pg16` (vector extension available, switched on at Stage 3); Airflow metadata on plain `postgres:16`
 - Vector store: pgvector, inside the `depwatch` database (not a separate vector DB)
 - DB access layer: SQLAlchemy Core (not the ORM)
 - Migrations: Alembic
@@ -116,7 +116,7 @@ Thin DAGs: a DAG file wires tasks together and schedules them. All real logic li
 
 Add each service only when the stage that uses it arrives.
 
-- Stage 0/1: Postgres (on the pgvector image) and the Airflow 3.x LocalExecutor services (api-server, scheduler, dag-processor, triggerer, init). No Redis, no worker, no Flower.
+- Stage 0/1: two Postgres containers (`postgres` metadata + `appdb` on pgvector) and the Airflow 3.x LocalExecutor services (api-server, scheduler, dag-processor, triggerer, init). No Redis, no worker, no Flower.
 - MinIO: added when we start landing raw JSON.
 - Prometheus + Grafana: added at Stage 5.
 

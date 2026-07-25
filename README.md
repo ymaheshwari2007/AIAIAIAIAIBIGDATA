@@ -7,9 +7,9 @@ It's built in stages. **Right now it's at Stage 0:** the data spine is stood up 
 ## What's running
 
 - **Apache Airflow 3.3.0** (LocalExecutor) — api-server, scheduler, dag-processor, triggerer
-- **Postgres 16** on the `pgvector` image, holding two databases:
-  - `airflow` — Airflow's own metadata
-  - `depwatch` — our application data (empty for now)
+- **Two Postgres containers:**
+  - `postgres` (Postgres 16) — Airflow's own metadata
+  - `appdb` (Postgres 16 + pgvector) — our application data, the `depwatch` database (empty for now)
 
 MinIO, Prometheus, and Grafana arrive in later stages.
 
@@ -37,9 +37,13 @@ The first run pulls a few hundred MB of images, so give it a few minutes.
 
 ## Use it
 
-- **Airflow UI** → <http://localhost:8080>, log in with `airflow` / `airflow`.
+- **Airflow UI** (a web page) → open <http://localhost:8080> in a browser, log in with `airflow` / `airflow`.
   It's empty of DAGs on purpose (Airflow's examples are turned off) — that's expected at Stage 0.
-- **Postgres** → `localhost:5432`, database `depwatch`, user `depwatch` / password `root`.
+- **App database** (not a web page — a browser can't open it) → connect a Postgres client
+  (`psql`, [DBeaver](https://dbeaver.io), or a VS Code SQL extension) with:
+  host `localhost`, port `5432`, database `depwatch`, user `depwatch`, password `root`.
+  Fastest, no install: `docker compose exec appdb psql -U depwatch -d depwatch`.
+  It has no tables until we run migrations (Stage 2).
 
 ## Everyday commands
 
@@ -56,7 +60,6 @@ docker compose down -v                   # stop AND wipe the database volume (fu
 
 ```text
 docker-compose.yaml     the whole stack
-docker/postgres-initdb/ creates the depwatch database on first boot
 dags/                   Airflow DAGs (thin orchestration only)
 depwatch/               the importable library (the real logic lives here)
 .env.example            copy to .env
