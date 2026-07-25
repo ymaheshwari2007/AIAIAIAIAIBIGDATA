@@ -41,9 +41,9 @@ The first run pulls a few hundred MB of images, so give it a few minutes.
   It's empty of DAGs on purpose (Airflow's examples are turned off) — that's expected at Stage 0.
 - **App database** (not a web page — a browser can't open it) → connect a Postgres client
   (`psql`, [DBeaver](https://dbeaver.io), or a VS Code SQL extension) with:
-  host `localhost`, port `5432`, database `depwatch`, user `depwatch`, password `root`.
+  host `localhost`, port `5433`, database `depwatch`, user `depwatch`, password `root`.
+  (Port 5433, not 5432, so it doesn't collide with a Postgres you may already run locally.)
   Fastest, no install: `docker compose exec appdb psql -U depwatch -d depwatch`.
-  It has no tables until we run migrations (Stage 2).
 
 ## Everyday commands
 
@@ -54,7 +54,28 @@ docker compose down                      # stop everything, KEEP the data
 docker compose down -v                   # stop AND wipe the database volume (full reset)
 ```
 
-`down` keeps your databases in a Docker volume, so `up -d` next time picks up where you left off. Use `-v` only for a clean slate — it deletes the Postgres data, and the `depwatch` database is only recreated on a fresh, empty volume.
+`down` keeps your databases in a Docker volume, so `up -d` next time picks up where you left off. Use `-v` only for a clean slate — it deletes the Postgres data; `appdb` then comes back with an empty `depwatch` database, and you re-run migrations (below) to rebuild the schema.
+
+## Local development (migrations)
+
+Alembic — our schema-migration tool — runs on **your machine**, not in a container, so it needs a Python environment. One-time setup:
+
+```bash
+python3.13 -m venv .venv          # 3.13 to match the Airflow image
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Then, with `appdb` running (Alembic reaches it at `localhost:5433`):
+
+```bash
+alembic upgrade head               # apply all migrations
+alembic revision -m "add findings" # start a new migration, then edit the generated file
+alembic downgrade -1               # roll back one
+alembic current                    # what's applied right now
+```
+
+Run these from the repo root, so `alembic/env.py` can import `depwatch.config` and read `.env`. There are no app tables yet — the schema gets designed at Stage 2.
 
 ## Layout
 
@@ -62,6 +83,8 @@ docker compose down -v                   # stop AND wipe the database volume (fu
 docker-compose.yaml     the whole stack
 dags/                   Airflow DAGs (thin orchestration only)
 depwatch/               the importable library (the real logic lives here)
+alembic/                database migrations (+ alembic.ini at the root)
+requirements.txt        host-side Python deps (Alembic, SQLAlchemy, ...)
 .env.example            copy to .env
 ```
 

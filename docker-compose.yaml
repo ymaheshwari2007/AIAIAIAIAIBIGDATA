@@ -61,7 +61,7 @@ services:
       POSTGRES_PASSWORD: ${DEPWATCH_DB_PASSWORD:-root}
       POSTGRES_DB: ${DEPWATCH_DB_NAME:-depwatch}
     ports:
-      - "5432:5432"                     # localhost:5432 -> this one (for Alembic/psql)
+      - "5433:5432"                     # localhost:5433 -> this one (5432 is taken by a local Postgres)
     volumes:
       - appdb-volume:/var/lib/postgresql/data
     healthcheck:
