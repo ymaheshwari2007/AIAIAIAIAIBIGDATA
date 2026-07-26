@@ -47,12 +47,13 @@ Everything here was chosen by the owners. This is the source of truth.
 - Language: Python
 - Orchestration: Apache Airflow 3.x
 - Executor: LocalExecutor (tasks run in the scheduler; no Redis, no separate worker)
-- Database: two Postgres containers — `postgres` (Airflow metadata) and `appdb` (our `depwatch` app data). Kept separate so resetting our schema never disturbs Airflow.
+- Database: two Postgres containers — `postgres` (Airflow metadata) and `appdb` (our `depwatch` app data, on host port `5433` since `5432` is often taken by a local Postgres). Kept separate so resetting our schema never disturbs Airflow.
 - Postgres images: app DB (`appdb`) on `pgvector/pgvector:pg16` (vector extension available, switched on at Stage 3); Airflow metadata on plain `postgres:16`
 - Vector store: pgvector, inside the `depwatch` database (not a separate vector DB)
 - DB access layer: SQLAlchemy 2.0 ORM (declarative models); idempotent writes use Core-style `insert().on_conflict_do_update()`
 - Migrations: Alembic
 - Raw storage: MinIO (S3-compatible object storage), the raw landing zone for untouched API responses
+- Secrets: API tokens (e.g. `GITHUB_TOKEN` for the GHSA API) live in `.env` env vars, not Airflow connections; the Fernet key stays deferred until we need encrypted connection storage
 - Airflow UI port: 8080 (default)
 - Data sources: GitHub Security Advisories (GHSA) + OSV.dev as primary, NVD as enrichment
 - Observability tools: Prometheus + Grafana (specific dashboards/metrics deferred, see below)
@@ -117,7 +118,7 @@ Thin DAGs: a DAG file wires tasks together and schedules them. All real logic li
 Add each service only when the stage that uses it arrives.
 
 - Stage 0/1: two Postgres containers (`postgres` metadata + `appdb` on pgvector) and the Airflow 3.x LocalExecutor services (api-server, scheduler, dag-processor, triggerer, init). No Redis, no worker, no Flower.
-- MinIO: added when we start landing raw JSON.
+- MinIO: ✅ added at Stage 1 for raw JSON landing. Console at `localhost:9001`.
 - Prometheus + Grafana: added at Stage 5.
 
 ---
@@ -204,9 +205,9 @@ Airflow UI at `localhost:8080` (login `airflow` / `airflow`). Grafana at `localh
 Grouped as three phases across six stages. **Currently: Phase 1.**
 
 **Phase 1, data spine (Stages 0-2). CURRENT.**
-- Stage 0: minimal compose (Postgres + Airflow LocalExecutor services), config, a hello-world DAG that runs green, Alembic set up.
-- Stage 1: DAGs for GHSA and OSV, raw landing in MinIO, normalized rows in Postgres via SQLAlchemy ORM, NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
-- Stage 2: design the Postgres schema (the owners drive).
+- Stage 0 — ✅ **done**: two-Postgres + Airflow LocalExecutor compose, `depwatch/config.py`, a hello-world DAG running green (`dags/hellow_world.py`), Alembic wired to `appdb`.
+- Stage 1 — 🔨 **in progress**: GHSA advisories → raw JSON landed in MinIO **works** (`depwatch/sources/ghsa.py` fetch/paginate + `ingest_raw`, using `depwatch/storage/minio.py`; HTTP via `requests`; raw objects keyed `github/dt=<ingest-date>/advisories_p<n>.json`). Remaining: the Airflow DAG that runs it daily, then OSV, NVD, and normalized rows in Postgres. Done when fresh advisories land daily unattended and reruns never duplicate.
+- Stage 2: design the Postgres schema (the owners drive) — from the raw advisories we've now landed.
 
 **Phase 2, AI layer (Stages 3-4).**
 - Stage 3: pick the embedding model, embed into pgvector, build metadata-filtered retrieval (filter by ecosystem/package, then vector rank).
