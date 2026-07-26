@@ -50,7 +50,7 @@ Everything here was chosen by the owners. This is the source of truth.
 - Database: two Postgres containers — `postgres` (Airflow metadata) and `appdb` (our `depwatch` app data). Kept separate so resetting our schema never disturbs Airflow.
 - Postgres images: app DB (`appdb`) on `pgvector/pgvector:pg16` (vector extension available, switched on at Stage 3); Airflow metadata on plain `postgres:16`
 - Vector store: pgvector, inside the `depwatch` database (not a separate vector DB)
-- DB access layer: SQLAlchemy Core (not the ORM)
+- DB access layer: SQLAlchemy 2.0 ORM (declarative models); idempotent writes use Core-style `insert().on_conflict_do_update()`
 - Migrations: Alembic
 - Raw storage: MinIO (S3-compatible object storage), the raw landing zone for untouched API responses
 - Airflow UI port: 8080 (default)
@@ -81,7 +81,7 @@ Everything here was chosen by the owners. This is the source of truth.
                                                                                  +-- findings ----+
 ```
 
-Airflow DAGs pull advisories daily, land raw JSON in MinIO and normalized rows in Postgres (via SQLAlchemy Core), embed advisory text into pgvector, then the agent takes a project's dependency file, retrieves relevant advisories, reasons about real impact, and writes findings plus per-project memory back to Postgres. Everything emits Prometheus metrics that Grafana renders.
+Airflow DAGs pull advisories daily, land raw JSON in MinIO and normalized rows in Postgres (via SQLAlchemy ORM), embed advisory text into pgvector, then the agent takes a project's dependency file, retrieves relevant advisories, reasons about real impact, and writes findings plus per-project memory back to Postgres. Everything emits Prometheus metrics that Grafana renders.
 
 ---
 
@@ -99,7 +99,7 @@ depwatch/
 |   |-- config.py             # all env vars read once, here
 |   |-- sources/              # one client per data source
 |   |-- transform/            # normalization + multi-source merge
-|   |-- storage/              # Postgres (SQLAlchemy Core) + MinIO access
+|   |-- storage/              # Postgres (SQLAlchemy ORM) + MinIO access
 |   |-- embedding/            # embedding + vector search (Stage 3)
 |   |-- agent/                # retrieval, prompts, triage loop, memory (Stage 4)
 |   +-- metrics/              # Prometheus instrumentation (Stage 5)
@@ -139,7 +139,7 @@ Add each service only when the stage that uses it arrives.
 Re-running any pull must never duplicate rows. Airflow retries tasks, incremental pulls overlap at the edges, and we trigger DAGs by hand constantly, so every advisory can arrive many times.
 
 - Every advisory row's identity is the pair `(source, source_id)`, with a UNIQUE constraint on that pair.
-- Writes are upserts: `INSERT ... ON CONFLICT (source, source_id) DO UPDATE SET <mutable fields>, updated_at = now()`. In SQLAlchemy Core this is the Postgres `insert(...).on_conflict_do_update(...)`.
+- Writes are upserts: `INSERT ... ON CONFLICT (source, source_id) DO UPDATE SET <mutable fields>, updated_at = now()`. Use the Postgres-specific `insert(...).on_conflict_do_update(...)` — it works against ORM models in SQLAlchemy 2.0.
 - The pair, not the bare id, is the key on purpose: the same CVE appears in GHSA, OSV, and NVD, and keying on `source_id` alone would make those copies overwrite each other. Keeping `source` in the key lets each source hold its own row, which the merge step reconciles later.
 - Keep `created_at` fixed on update; only refresh `updated_at` and the mutable fields.
 
@@ -205,7 +205,7 @@ Grouped as three phases across six stages. **Currently: Phase 1.**
 
 **Phase 1, data spine (Stages 0-2). CURRENT.**
 - Stage 0: minimal compose (Postgres + Airflow LocalExecutor services), config, a hello-world DAG that runs green, Alembic set up.
-- Stage 1: DAGs for GHSA and OSV, raw landing in MinIO, normalized rows in Postgres via SQLAlchemy Core, NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
+- Stage 1: DAGs for GHSA and OSV, raw landing in MinIO, normalized rows in Postgres via SQLAlchemy ORM, NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
 - Stage 2: design the Postgres schema (the owners drive).
 
 **Phase 2, AI layer (Stages 3-4).**
