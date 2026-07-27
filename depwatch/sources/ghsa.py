@@ -24,9 +24,9 @@ def _headers() -> dict[str, str]:
 def fetch_advisories(updated_since: str | None = None) -> Iterator[list[dict]]:
     """Yield each page of reviewed advisories until GitHub has no more.
 
-    Pages are cursor-paginated via the Link header. `updated_since` (e.g.
-    ">=2026-07-01") limits results to advisories changed since then — that's how
-    the daily DAG does incremental pulls. None fetches everything (a backfill).
+    Pages are cursor-paginated via the Link header. `updated_since` is a bare
+    timestamp (e.g. "2026-07-01"); we prepend GitHub's ">=" so it means "changed
+    since then" — how the daily DAG does incremental pulls. None = full backfill.
     """
     params = {
         "per_page": 100,
@@ -35,7 +35,7 @@ def fetch_advisories(updated_since: str | None = None) -> Iterator[list[dict]]:
         "type": "reviewed",
     }
     if updated_since:
-        params["updated"] = updated_since
+        params["updated"] = f">={updated_since}"
 
     # first page: send our params
     resp = requests.get(API_URL, headers=_headers(), params=params)
@@ -50,21 +50,26 @@ def fetch_advisories(updated_since: str | None = None) -> Iterator[list[dict]]:
         yield resp.json()
 
 
-def ingest_raw(updated_since: str | None = None, max_pages: int | None = None) -> int:
+def ingest_raw(updated_since: str | None = None, max_pages: int | None = None) -> dict:
     """Fetch advisories and land each raw page as a JSON object in MinIO.
 
     Ties fetch_advisories() to the MinIO wrapper — the GHSA ingest the thin DAG
     will call. Objects are keyed by ingest date: github/dt=<today>/advisories_p<n>.json.
     `updated_since` does incremental pulls; `max_pages` caps the crawl (for testing).
-    Returns the number of pages landed.
+
+    Returns {"pages": <int>, "newest_updated": <str|None>}: the page count (for
+    logging) and the newest advisory's updated_at — the next watermark, None when empty.
     """
     store = miniIO()
     store.ensure_bucket()
 
     today = date.today().isoformat()
     pages = 0
+    newest_updated: str | None = None
     for pages, page in enumerate(fetch_advisories(updated_since), start=1):
+        if pages == 1 and page:  # sorted updated desc -> first advisory is the newest
+            newest_updated = page[0]["updated_at"]
         store.insertJSON(f"github/dt={today}/advisories_p{pages}.json", page)
         if max_pages and pages >= max_pages:
             break
-    return pages
+    return {"pages": pages, "newest_updated": newest_updated}

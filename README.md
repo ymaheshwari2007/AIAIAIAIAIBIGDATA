@@ -72,7 +72,7 @@ Each teammate uses their own token. `.env` is gitignored and never leaves your m
 With MinIO up and your token in `.env`, land some real advisories from the host venv:
 
 ```bash
-.venv/bin/python -c "from depwatch.sources.ghsa import ingest_raw; print(ingest_raw(max_pages=3), 'pages landed')"
+.venv/bin/python -c "from depwatch.sources.ghsa import ingest_raw; print(ingest_raw(max_pages=3))"
 ```
 
 - `max_pages=3` grabs ~300 advisories (3 pages of 100); drop it for the full backfill (~300 pages).
