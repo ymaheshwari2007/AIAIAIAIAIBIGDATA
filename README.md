@@ -2,14 +2,14 @@
 
 A small vulnerability-intelligence platform we're building to learn data engineering and applied AI. It ingests public security advisories, indexes them, and (later) uses an LLM agent to flag which of our own dependencies are actually at risk.
 
-Built in stages. **Right now: Stage 1** — the ingestion pipeline pulls GitHub security advisories and lands the raw JSON in object storage. **Stage 0** (Airflow + Postgres + Alembic) is done.
+Built in stages. **Right now: Stage 2 just landed** — the app schema (`advisories` + `affected`) is designed and live in Postgres (see [Schema](#schema)). Already done: **Stage 0** (Airflow + Postgres + Alembic) and **Stage 1a** (GHSA advisories → raw JSON in MinIO, run daily by an Airflow DAG). **Next:** Stage 1b — loading the raw advisories from MinIO into these tables.
 
 ## What's running
 
 - **Apache Airflow 3.3.0** (LocalExecutor) — api-server, scheduler, dag-processor, triggerer. UI at `localhost:8080`.
 - **Two Postgres containers:**
   - `postgres` (Postgres 16) — Airflow's own metadata.
-  - `appdb` (Postgres 16 + pgvector) — our `depwatch` database, reachable at `localhost:5433`. Under Alembic migration control; no app tables yet (schema is Stage 2).
+  - `appdb` (Postgres 16 + pgvector) — our `depwatch` database, reachable at `localhost:5433`. Under Alembic migration control; now holds the `advisories` and `affected` tables (see [Schema](#schema)), still empty until the Stage 1b loader runs.
 - **MinIO** (S3-compatible object storage) — the raw landing zone for untouched advisory JSON. Console at `localhost:9001`.
 
 Prometheus + Grafana arrive at Stage 5.
@@ -18,10 +18,53 @@ Prometheus + Grafana arrive at Stage 5.
 
 - `depwatch/config.py` — reads all config from `.env` in one place (DB URL, MinIO settings, GitHub token).
 - `depwatch/storage/minio.py` — `miniIO` wrapper: ensure a bucket, write JSON objects.
+- `depwatch/storage/postgres.py` — the SQLAlchemy 2.0 ORM models (`Advisory`, `Affected`) that define the [schema](#schema) below.
 - `depwatch/sources/ghsa.py` — the GitHub Advisories client: `fetch_advisories()` (paginates the API via the `Link` header) and `ingest_raw()` (fetches + lands each page into MinIO).
+- `dags/ingest_ghsa.py` — the daily Airflow DAG: read a watermark → fetch new advisories → land them in MinIO → save the new watermark.
 - `dags/hellow_world.py` — a hello-world Airflow DAG, proving the orchestration runs.
 
-The GHSA → MinIO ingestion works today; the daily Airflow DAG that runs it is the next step.
+The GHSA → MinIO ingestion runs daily on a schedule, and the curated tables are designed and migrated (below). Next up is the Stage 1b loader that reads the raw MinIO JSON and upserts it into `advisories` + `affected`.
+
+## Schema
+
+Two tables in the `depwatch` database — SQLAlchemy models in `depwatch/storage/postgres.py`, created via Alembic. Each advisory is stored **per source** and keyed by the pair `(source, source_id)`; the packages a vuln affects hang off it as child rows.
+
+```mermaid
+erDiagram
+    advisories ||--o{ affected : "affects"
+    advisories {
+        int id PK
+        string source "github / osv / nvd"
+        string source_id "e.g. GHSA-... or CVE-..."
+        string cve_id
+        text summary
+        text description
+        string severity
+        numeric cvss_score
+        text cvss_vector
+        numeric epss_score
+        text_array cwes "CWE ids"
+        timestamptz published_at
+        timestamptz source_updated_at
+        timestamptz withdrawn_at
+        text url
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    affected {
+        int id PK
+        int advisory_id FK
+        string ecosystem
+        text package_name
+        text vulnerable_range
+        text fixed_version
+        timestamptz created_at
+    }
+```
+
+- **`advisories`** — one row per source's view of a vulnerability. `UNIQUE(source, source_id)` is the idempotency key: re-ingesting upserts instead of duplicating. The same vuln from GHSA and OSV is kept as *two* rows on purpose (different `source`); a later merge step reconciles them.
+- **`affected`** — the packages a vuln hits, one row per package × version range. FK to `advisories` with `ON DELETE CASCADE`. `UNIQUE(advisory_id, ecosystem, package_name, vulnerable_range)` keeps re-ingest idempotent; `INDEX(ecosystem, package_name)` powers the "are we affected?" lookup.
+- The pgvector embedding column is deliberately **not** here yet — it's added at Stage 3 once we pick the embedding model.
 
 ## Prerequisites
 
@@ -107,7 +150,7 @@ alembic downgrade -1               # roll back one
 alembic current                    # what's applied right now
 ```
 
-Run from the repo root, so `alembic/env.py` can import `depwatch.config` and read `.env`. No app tables yet — the schema gets designed at Stage 2.
+Run from the repo root, so `alembic/env.py` can import `depwatch.config` (for the URL) and `depwatch.storage.postgres.Base` (so autogenerate can diff the models against the live DB). The `advisories` + `affected` tables are migrated in — see [Schema](#schema).
 
 ## Layout
 
@@ -118,6 +161,7 @@ depwatch/               the importable library — the real logic:
   config.py               all env/config read here
   sources/ghsa.py         GitHub Advisories client + raw ingest
   storage/minio.py        MinIO (object storage) wrapper
+  storage/postgres.py     SQLAlchemy ORM models -> advisories, affected
 alembic/                database migrations (+ alembic.ini at the root)
 requirements.txt        host Python deps (requests, minio, Alembic, SQLAlchemy, ...)
 .env.example            copy to .env (and add your GitHub token)

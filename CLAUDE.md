@@ -59,6 +59,7 @@ Everything here was chosen by the owners. This is the source of truth.
 - Observability tools: Prometheus + Grafana (specific dashboards/metrics deferred, see below)
 - Trivy: validation benchmark and container scanner ONLY, never the matching engine
 - Packaging: Docker Compose, built up incrementally (add a service only when the current stage needs it)
+- App schema (Stage 2): two tables — `advisories` (one row per `(source, source_id)`) and `affected` (child, one row per package × version range, FK to advisories with `ON DELETE CASCADE`). Package identity (`ecosystem` + `package_name`) lives as columns on `affected`, NOT a separate `packages` table (promote to a 3-table many-to-many later only if needed). `cwes` is a `text[]` array column; `cve_id` is a single nullable column. Cross-source dedup is a MERGE-step concern, not ingest — both GHSA and OSV rows are kept (that's why the key is the pair). Provenance trimmed to a single `url`. No pgvector column yet (Stage 3). Diagram in the README "Schema" section; models in `depwatch/storage/postgres.py`.
 
 **OPEN (not yet decided, ask the owners before acting):**
 - Nothing outstanding right now. If a new fork appears, it lands here until the owners decide.
@@ -66,7 +67,6 @@ Everything here was chosen by the owners. This is the source of truth.
 **DEFERRED (decide when we reach the stage, not before):**
 - Embedding model (Stage 3): local free model vs paid API
 - Agent framework (Stage 4): raw SDK loop vs a framework like LangGraph
-- Database schema (Stage 2): the owners drive the design
 - Which metrics and dashboards (Stage 5)
 
 ---
@@ -164,7 +164,7 @@ If you're ever about to suggest "just call Trivy here" in place of our own retri
 - Every table gets `created_at timestamptz default now()`, and `updated_at` where mutable.
 - Advisories carry `source` and `source_id` with a UNIQUE constraint on the pair (see idempotency above). A plain auto-increment `id` can serve as the primary key alongside it.
 - Schema changes go through Alembic migrations. Do not hardcode the pgvector embedding dimension until we pick the embedding model at Stage 3.
-- The schema itself is the owners' to design (Stage 2). Propose and advise; do not finalize tables on your own.
+- The Stage 2 schema is now designed and migrated (see the Decision Log and the README "Schema" section): `advisories` + `affected`. Future schema changes — new tables, and the pgvector column at Stage 3 — still go through Alembic and remain the owners' call; propose and advise, don't finalize tables on your own.
 
 ## Airflow conventions
 
@@ -206,8 +206,8 @@ Grouped as three phases across six stages. **Currently: Phase 1.**
 
 **Phase 1, data spine (Stages 0-2). CURRENT.**
 - Stage 0 — ✅ **done**: two-Postgres + Airflow LocalExecutor compose, `depwatch/config.py`, a hello-world DAG running green (`dags/hellow_world.py`), Alembic wired to `appdb`.
-- Stage 1 — 🔨 **in progress**: GHSA advisories → raw JSON landed in MinIO **works** (`depwatch/sources/ghsa.py` fetch/paginate + `ingest_raw`, using `depwatch/storage/minio.py`; HTTP via `requests`; raw objects keyed `github/dt=<ingest-date>/advisories_p<n>.json`). Remaining: the Airflow DAG that runs it daily, then OSV, NVD, and normalized rows in Postgres. Done when fresh advisories land daily unattended and reruns never duplicate.
-- Stage 2: design the Postgres schema (the owners drive) — from the raw advisories we've now landed.
+- Stage 1 — 🔨 **in progress**: **Stage 1a ✅ done** — GHSA advisories → raw JSON in MinIO, run daily by `dags/ingest_ghsa.py` with a watermark (`depwatch/sources/ghsa.py` fetch/paginate + `ingest_raw`, via `depwatch/storage/minio.py`; HTTP via `requests`; raw objects keyed `github/dt=<ingest-date>/advisories_p<n>.json`). OSV client written by the partner (commit pending). **Stage 1b remaining:** load/normalize the raw advisories from MinIO into Postgres (`advisories` + `affected`) via upsert, then NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
+- Stage 2 — ✅ **done**: Postgres schema designed and migrated — `advisories` + `affected` (see the Decision Log and README "Schema"). Models in `depwatch/storage/postgres.py`, `alembic/env.py` wired to `Base.metadata`, migration `6ec38f936a6a` applied.
 
 **Phase 2, AI layer (Stages 3-4).**
 - Stage 3: pick the embedding model, embed into pgvector, build metadata-filtered retrieval (filter by ecosystem/package, then vector rank).
