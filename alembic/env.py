@@ -12,6 +12,7 @@ config = context.config
 # Use our own URL (built from .env) instead of the placeholder in alembic.ini,
 # so the password never lives in a committed file.
 from depwatch.config import database_url
+from depwatch.storage.postgres import Base
 
 config.set_main_option("sqlalchemy.url", database_url())
 
@@ -20,11 +21,8 @@ config.set_main_option("sqlalchemy.url", database_url())
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# our models' metadata, so 'autogenerate' can diff them against the live DB
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
