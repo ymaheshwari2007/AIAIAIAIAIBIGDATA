@@ -1,4 +1,6 @@
 alembic==1.18.5
+minio==7.2.20
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
+requests==2.34.2
 SQLAlchemy==2.0.51
