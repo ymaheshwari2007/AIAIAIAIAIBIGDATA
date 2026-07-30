@@ -8,6 +8,7 @@ The embedding/vector column is added later (Stage 3), once the model is chosen.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import (
@@ -17,10 +18,22 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    create_engine,
+    delete,
     func,
+    insert,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+)
+
+from depwatch import config
 
 
 class Base(DeclarativeBase):
@@ -102,3 +115,57 @@ class Affected(Base):
         ),
         Index("ix_affected_ecosystem_package", "ecosystem", "package_name"),
     )
+
+
+# --- app-side DB access: engine, session, writes ---------------------------
+
+_engine = None
+
+
+def get_engine():
+    """Lazily create the app engine from config.database_url() (host vs container aware)."""
+    global _engine
+    if _engine is None:
+        _engine = create_engine(config.database_url())
+    return _engine
+
+
+@contextmanager
+def session_scope():
+    """Transactional scope: commit on success, roll back on error, always close."""
+    session = Session(get_engine())
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+_ADVISORY_KEY = ("source", "source_id")  # the (source, source_id) conflict key
+
+
+def upsert_advisory(session: Session, advisory: dict, affected: list[dict]) -> None:
+    """Idempotently write one advisory + its affected rows. Caller commits.
+
+    Upsert the advisory on (source, source_id); on conflict, refresh the mutable
+    fields and bump updated_at. Then replace the advisory's affected rows so a
+    changed package list never leaves stale children.
+    """
+    stmt = pg_insert(Advisory).values(**advisory)
+    set_ = {col: stmt.excluded[col] for col in advisory if col not in _ADVISORY_KEY}
+    set_["updated_at"] = func.now()
+    stmt = stmt.on_conflict_do_update(
+        index_elements=list(_ADVISORY_KEY),
+        set_=set_,
+    ).returning(Advisory.id)
+    advisory_id = session.execute(stmt).scalar_one()
+
+    session.execute(delete(Affected).where(Affected.advisory_id == advisory_id))
+    if affected:
+        session.execute(
+            insert(Affected),
+            [{**row, "advisory_id": advisory_id} for row in affected],
+        )
