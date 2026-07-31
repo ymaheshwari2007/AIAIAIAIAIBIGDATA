@@ -25,6 +25,14 @@ def database_url() -> str:
     return f"postgresql+psycopg2://{user}:{password}@localhost:5433/{name}"
 
 
+def github_token() -> str | None:
+    """GitHub PAT for the advisories API (raises the rate limit to 5000/hr).
+
+    Optional — unset means unauthenticated (60/hr). Set it in .env, never in code.
+    """
+    return os.environ.get("GITHUB_TOKEN") or None
+
+
 def minio_settings() -> dict[str, str]:
     """Connection settings for MinIO, the raw landing zone.
 

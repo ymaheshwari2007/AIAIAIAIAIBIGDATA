@@ -5,8 +5,8 @@
 ---
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.3.0-python3.13}
-  # build: .          # swap image -> build once we need our own deps (Stage 1)
+  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.3.0-python3.13}
+  build: .            # custom image (./Dockerfile) with our runtime deps: minio, python-dotenv
   env_file:
     - path: .env
       required: false
@@ -24,6 +24,7 @@ x-airflow-common:
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     PYTHONPATH: '/opt/airflow'          # so DAGs can `import depwatch`
     DEPWATCH_DATABASE_URL: "postgresql://${DEPWATCH_DB_USER:-depwatch}:${DEPWATCH_DB_PASSWORD:-root}@appdb:5432/${DEPWATCH_DB_NAME:-depwatch}"
+    DEPWATCH_MINIO_ENDPOINT: minio:9000   # containers reach MinIO by service name (host uses localhost:9000)
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -66,6 +67,25 @@ services:
       - appdb-volume:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${DEPWATCH_DB_USER:-depwatch}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Raw landing zone: untouched API responses (S3-compatible object storage).
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${DEPWATCH_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${DEPWATCH_MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"     # S3 API — our code talks here
+      - "9001:9001"     # web console — humans look here
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -175,3 +195,4 @@ services:
 volumes:
   postgres-db-volume:
   appdb-volume:
+  minio-data:
