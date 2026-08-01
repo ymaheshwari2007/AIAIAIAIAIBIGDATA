@@ -1,8 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from airflow.sdk import dag, task, Variable  
 
-from airflow.sdk import dag, task, Variable   # verify the 3.x import when we build
-
-from depwatch.sources.ghsa import ingest_raw
+from depwatch.sources.ghsa import ingest_raw, load_ghsa
 
 watermark_key = "GHSA_Updated"
 
@@ -22,5 +21,10 @@ def GHSA():
     watermark = new['newest_updated']
     if watermark:
       Variable.set(watermark_key, watermark)
-  ingest()
+    
+    return date.today().isoformat()
+  @task
+  def load(dt: str):
+    load_ghsa(dt)
+  load(ingest())
 GHSA()

@@ -23,3 +23,19 @@ class miniIO():
     len(raw),
     content_type="application/json",
 )
+
+  def readJSON(self,key):
+    # mirror of insertJSON: fetch an object and parse it back to Python.
+    # get_object streams over HTTP, so close + release_conn or the pooled
+    # connection leaks.
+    response = self.client.get_object(self.bucket,key)
+    try:
+      return json.loads(response.read())
+    finally:
+      response.close()
+      response.release_conn()
+
+  def listKeys(self,prefix):
+    # object names under a prefix, e.g. a whole partition "github/dt=2026-07-27/"
+    objects = self.client.list_objects(self.bucket,prefix=prefix,recursive=True)
+    return [obj.object_name for obj in objects]

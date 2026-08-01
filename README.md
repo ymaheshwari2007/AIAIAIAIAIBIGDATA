@@ -119,7 +119,7 @@ With MinIO up and your token in `.env`, land some real advisories from the host 
 ```
 
 - `max_pages=3` grabs ~300 advisories (3 pages of 100); drop it for the full backfill (~300 pages).
-- Objects land under `raw-advisories/github/dt=<today>/advisories_p<N>.json` — one object per page, partitioned by the day you pulled.
+- Objects land under `raw-advisories/github/dt=<today>/run=<HHMMSS>/advisories_p<N>.json` — one object per page, partitioned by the day *and the run*, so two runs on the same day never overwrite each other (raw stays append-only).
 - See them: open the MinIO console at `localhost:9001` (`minioadmin` / `minioadmin`) → `raw-advisories` bucket.
 
 ## Use it
