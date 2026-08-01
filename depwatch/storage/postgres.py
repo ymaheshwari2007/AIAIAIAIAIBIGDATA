@@ -3,7 +3,8 @@
 Stage 2 tables:
 - advisories: one row per source's view of a vulnerability, keyed by (source, source_id).
 - affected:   child of advisories, one row per affected package x version range.
-The embedding/vector column is added later (Stage 3), once the model is chosen.
+The embedding column (Stage 3) holds Qwen3-Embedding-0.6B vectors (1024-dim);
+embedded_at drives incremental re-embedding.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
+from pgvector.sqlalchemy import Vector
 
 from depwatch import config
 
@@ -68,6 +70,11 @@ class Advisory(Base):
 
     # one verification link
     url: Mapped[str | None] = mapped_column(Text)
+
+    # Stage 3: semantic embedding of the advisory text (Qwen3-0.6B, 1024-dim), plus
+    # when it was last embedded (drives incremental re-embedding vs updated_at)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    embedded_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     # our own row bookkeeping (created_at fixed; updated_at refreshed on upsert)
     created_at: Mapped[datetime] = mapped_column(

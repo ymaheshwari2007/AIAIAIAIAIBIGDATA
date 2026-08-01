@@ -36,6 +36,8 @@ Full autonomous implementation is fine for: config files, Docker/compose setup, 
 
 Stop and ask before: schema changes, adding any new dependency/service/tool, changing the agent's prompt strategy, deciding anything marked OPEN or DEFERRED below, and anything touching more than ~3 files.
 
+**Default to plan mode; never edit in edit-only mode by default.** Start every task by planning. Do not make file edits or run state-changing commands (writes, installs, downloads, `docker`, migrations) until a plan is presented and the owners approve it. Leave plan mode / make changes only when the owners explicitly say to proceed — and only for what the approved plan covers. "Explain first" is the floor; plan-first-then-approve is the default.
+
 ---
 
 ## Decision Log
