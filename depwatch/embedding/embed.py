@@ -66,3 +66,12 @@ def embed_new(batch_size:int = 200) -> int:
       )
       total += len(rows)
 
+
+if __name__ == "__main__":
+    # Entry point for the host embed subprocess: run the incremental embed and print
+    # the count as JSON so the launcher can return it. Loads the model, embeds on the
+    # GPU, writes to Postgres, then this process exits — freeing the ~2-3GB.
+    import json
+
+    print(json.dumps({"embedded": embed_new()}))
+

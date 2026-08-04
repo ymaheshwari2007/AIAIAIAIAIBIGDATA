@@ -26,5 +26,15 @@ def GHSA():
   @task
   def load(dt: str):
     load_ghsa(dt)
-  load(ingest())
+  @task
+  def embed():
+    # embedding runs on the host GPU launcher (torch isn't in this image); we just POST.
+    import os
+    import requests
+    url = os.environ.get("DEPWATCH_EMBED_URL", "http://host.docker.internal:8000/embed")
+    resp = requests.post(url, timeout=600)
+    resp.raise_for_status()
+    return resp.json()
+  loaded = load(ingest())
+  loaded >> embed()
 GHSA()
