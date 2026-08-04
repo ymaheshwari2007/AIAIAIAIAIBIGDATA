@@ -1,0 +1,297 @@
+<title>DepWatch Pipeline</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ground:#f4f6f9; --panel:#ffffff; --panel-2:#eef2f7;
+    --ink:#161f2b; --muted:#586a80; --faint:#8496ab; --line:#d9e1ec;
+    --accent:#0c8f83; --accent-ink:#0a766c; --accent-soft:rgba(12,143,131,.10);
+    --amber:#8a5a0c; --amber-soft:rgba(197,132,26,.14); --amber-line:#d8a23e;
+    --later:#8496ab; --later-soft:rgba(132,150,171,.12);
+    --shadow:0 1px 2px rgba(16,24,40,.05), 0 10px 30px rgba(16,24,40,.06);
+    --radius:9px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0b0f16; --panel:#131b28; --panel-2:#0d141e;
+      --ink:#dce6f1; --muted:#8695ab; --faint:#5f6f86; --line:#213042;
+      --accent:#39cabc; --accent-ink:#66dccf; --accent-soft:rgba(57,202,188,.13);
+      --amber:#f2b455; --amber-soft:rgba(242,180,85,.13); --amber-line:#c98f3d;
+      --later:#56657c; --later-soft:rgba(86,101,124,.16);
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 36px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#f4f6f9; --panel:#ffffff; --panel-2:#eef2f7;
+    --ink:#161f2b; --muted:#586a80; --faint:#8496ab; --line:#d9e1ec;
+    --accent:#0c8f83; --accent-ink:#0a766c; --accent-soft:rgba(12,143,131,.10);
+    --amber:#8a5a0c; --amber-soft:rgba(197,132,26,.14); --amber-line:#d8a23e;
+    --later:#8496ab; --later-soft:rgba(132,150,171,.12);
+    --shadow:0 1px 2px rgba(16,24,40,.05), 0 10px 30px rgba(16,24,40,.06);
+  }
+  :root[data-theme="dark"]{
+    --ground:#0b0f16; --panel:#131b28; --panel-2:#0d141e;
+    --ink:#dce6f1; --muted:#8695ab; --faint:#5f6f86; --line:#213042;
+    --accent:#39cabc; --accent-ink:#66dccf; --accent-soft:rgba(57,202,188,.13);
+    --amber:#f2b455; --amber-soft:rgba(242,180,85,.13); --amber-line:#c98f3d;
+    --later:#56657c; --later-soft:rgba(86,101,124,.16);
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 14px 36px rgba(0,0,0,.4);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 24px}
+  a{color:var(--accent-ink)}
+
+  /* ---- header ---- */
+  header{padding:52px 0 8px}
+  .eyebrow{
+    font-size:12px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent-ink); font-weight:600;
+  }
+  h1{
+    font-size:clamp(30px,5vw,46px); line-height:1.05; margin:12px 0 0;
+    letter-spacing:-.02em; text-wrap:balance; font-weight:800;
+  }
+  .thesis{font-size:clamp(16px,2.4vw,19px); color:var(--muted); max-width:60ch; margin:16px 0 0}
+  .toggle{
+    position:fixed; top:16px; right:16px; z-index:10;
+    background:var(--panel); border:1px solid var(--line); color:var(--ink);
+    border-radius:8px; padding:8px 10px; cursor:pointer; font-size:15px; box-shadow:var(--shadow);
+  }
+  .toggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* ---- stat strip ---- */
+  .stats{
+    display:flex; flex-wrap:wrap; gap:10px; margin:30px 0 6px;
+  }
+  .stat{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:12px 16px; flex:1 1 150px; box-shadow:var(--shadow);
+  }
+  .stat b{font-size:24px; font-weight:700; letter-spacing:-.01em; font-variant-numeric:tabular-nums; display:block}
+  .stat span{font-size:12.5px; color:var(--muted); letter-spacing:.02em}
+
+  section{padding:40px 0 0}
+  .sec-head{display:flex; align-items:baseline; gap:14px; margin-bottom:20px; flex-wrap:wrap}
+  .sec-head h2{font-size:14px; letter-spacing:.14em; text-transform:uppercase; margin:0; color:var(--faint); font-weight:600}
+  .sec-head p{margin:0; color:var(--muted); font-size:14px}
+
+  /* ---- high-level pipeline ---- */
+  .flowscroll{overflow-x:auto; padding-bottom:8px; margin:0 -24px; padding-left:24px; padding-right:24px}
+  .flow{display:flex; align-items:stretch; gap:0; min-width:760px}
+  .node{
+    flex:1 1 0; min-width:120px; background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); padding:14px 14px 16px; position:relative; box-shadow:var(--shadow);
+  }
+  .node .ph{font-size:11px; letter-spacing:.12em; color:var(--faint); display:flex; justify-content:space-between; align-items:center}
+  .node .nm{font-weight:700; margin-top:9px; font-size:15px; letter-spacing:-.01em}
+  .node .cmp{font-size:12px; color:var(--muted); margin-top:3px}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--later); display:inline-block; flex:none}
+  .node.done{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+  .node.done .dot{background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .node.now{border-color:var(--amber-line); background:linear-gradient(180deg,var(--amber-soft),transparent)}
+  .node.now .dot{background:var(--amber-line); box-shadow:0 0 0 3px var(--amber-soft)}
+  .conn{flex:0 0 34px; align-self:center; height:2px; position:relative; background:var(--line)}
+  .conn::after{content:""; position:absolute; right:-1px; top:-4px; border:5px solid transparent; border-left-color:var(--line); border-right:0}
+  .conn.live{background:linear-gradient(90deg,var(--accent),var(--accent))}
+  .conn.live::after{border-left-color:var(--accent)}
+  .conn.live::before{
+    content:""; position:absolute; inset:0;
+    background:repeating-linear-gradient(90deg,transparent 0 6px,var(--ground) 6px 10px);
+    opacity:.5; animation:flow 1s linear infinite;
+  }
+  @keyframes flow{to{background-position:10px 0}}
+  @media (prefers-reduced-motion:reduce){.conn.live::before{animation:none}}
+
+  /* ---- you are here ---- */
+  .here{
+    margin-top:26px; border:1px solid var(--amber-line); background:var(--amber-soft);
+    border-radius:var(--radius); padding:18px 20px; display:flex; gap:16px; align-items:flex-start;
+  }
+  .here .tag{
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:700;
+    color:var(--amber); border:1px solid var(--amber-line); border-radius:6px; padding:4px 8px; white-space:nowrap; flex:none;
+  }
+  .here p{margin:0; font-size:15px; color:var(--ink)}
+  .here b{color:var(--ink)}
+
+  /* ---- medium-level stage cards ---- */
+  .stages{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 18px 16px; box-shadow:var(--shadow); position:relative; display:flex; flex-direction:column; gap:8px;
+  }
+  .card.now{border-color:var(--amber-line)}
+  .card .top{display:flex; align-items:center; gap:10px}
+  .card .num{
+    font-size:12px; font-weight:700; color:var(--faint);
+    border:1px solid var(--line); border-radius:6px; padding:2px 7px; letter-spacing:.03em; flex:none;
+  }
+  .card .phase{font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint)}
+  .card h3{margin:2px 0 0; font-size:17px; letter-spacing:-.01em}
+  .card .desc{font-size:14px; color:var(--muted); margin:0}
+  .card .meta{font-size:12.5px; color:var(--faint); margin-top:2px}
+  .card .meta code{background:var(--panel-2); padding:1px 5px; border-radius:4px; font-size:12px}
+  .chip{
+    font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    padding:3px 9px; border-radius:20px; margin-left:auto; white-space:nowrap; flex:none;
+  }
+  .chip.done{color:var(--accent-ink); background:var(--accent-soft)}
+  .chip.now{color:var(--amber); background:var(--amber-soft); border:1px solid var(--amber-line)}
+  .chip.wip{color:var(--amber); background:var(--amber-soft)}
+  .chip.later{color:var(--later); background:var(--later-soft)}
+
+  /* ---- legend / footer ---- */
+  footer{padding:44px 0 60px; color:var(--muted); font-size:13px}
+  .legend{display:flex; flex-wrap:wrap; gap:16px; padding:16px 0; border-top:1px solid var(--line); margin-top:8px}
+  .legend span{display:inline-flex; align-items:center; gap:7px; font-size:13px}
+  .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
+</style>
+
+<button class="toggle" id="themeBtn" aria-label="Toggle light and dark theme">◐</button>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">DepWatch · vulnerability intelligence</div>
+    <h1>The pipeline, end to end</h1>
+    <p class="thesis">Public security advisories flow in every day, get landed raw, curated into a database, embedded into vectors, and (soon) reasoned over by an agent. Here's the whole path — and exactly where we are on it.</p>
+  </header>
+
+  <div class="stats mono">
+    <div class="stat"><b>33,874</b><span>advisories</span></div>
+    <div class="stat"><b>62,857</b><span>affected packages</span></div>
+    <div class="stat"><b>1,024</b><span>dims / vector</span></div>
+    <div class="stat"><b>100%</b><span>embedded</span></div>
+    <div class="stat"><b>~346</b><span>raw objects (MinIO)</span></div>
+  </div>
+
+  <section>
+    <div class="sec-head">
+      <h2>High level</h2>
+      <p>Six phases — data moves left to right. Teal = built, amber = the active edge, grey = still ahead.</p>
+    </div>
+    <div class="flowscroll">
+      <div class="flow mono">
+        <div class="node done"><div class="ph"><span>01 · SOURCES</span><span class="dot"></span></div><div class="nm">Feeds</div><div class="cmp">GHSA · OSV · NVD</div></div>
+        <div class="conn live"></div>
+        <div class="node done"><div class="ph"><span>02 · INGEST</span><span class="dot"></span></div><div class="nm">Airflow</div><div class="cmp">daily DAG</div></div>
+        <div class="conn live"></div>
+        <div class="node done"><div class="ph"><span>03 · STORE</span><span class="dot"></span></div><div class="nm">MinIO + Postgres</div><div class="cmp">raw → curated</div></div>
+        <div class="conn live"></div>
+        <div class="node now"><div class="ph"><span>04 · INDEX</span><span class="dot"></span></div><div class="nm">pgvector</div><div class="cmp">embed ✓ · retrieve →</div></div>
+        <div class="conn"></div>
+        <div class="node"><div class="ph"><span>05 · REASON</span><span class="dot"></span></div><div class="nm">LLM agent</div><div class="cmp">Stage 4</div></div>
+        <div class="conn"></div>
+        <div class="node"><div class="ph"><span>06 · OBSERVE</span><span class="dot"></span></div><div class="nm">Grafana</div><div class="cmp">Stage 5</div></div>
+      </div>
+    </div>
+
+    <div class="here">
+      <span class="tag">◀ You are here</span>
+      <p>All 33,874 advisories are now <b>embedded into pgvector</b> (just finished). Semantic search already works. <b>Next</b> is the retrieval function — filter by package, then vector-rank — which becomes the agent's input at Stage 4.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Medium level</h2>
+      <p>The nine concrete steps behind those six phases.</p>
+    </div>
+    <div class="stages">
+
+      <div class="card">
+        <div class="top"><span class="num mono">1</span><span class="phase">Sources</span><span class="chip wip">GHSA live</span></div>
+        <h3>Advisory feeds</h3>
+        <p class="desc">GitHub Security Advisories over the REST API — paginated via the <span class="mono">Link</span> header, 5,000 req/hr with a token.</p>
+        <p class="meta">GHSA done · OSV (partner) + NVD enrichment come later.</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">2</span><span class="phase">Ingest</span><span class="chip done">done</span></div>
+        <h3>Airflow DAG</h3>
+        <p class="desc">A daily thin DAG fetches new advisories using a watermark (only what changed), with retries. Fetch → land.</p>
+        <p class="meta"><code>ingest_ghsa</code> · <span class="mono">@daily</span> · incremental</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">3</span><span class="phase">Store · raw</span><span class="chip done">done</span></div>
+        <h3>MinIO landing zone</h3>
+        <p class="desc">Untouched JSON, immutable and append-only — the raw source of truth we can always re-derive from.</p>
+        <p class="meta mono">github/dt=&lt;date&gt;/run=&lt;time&gt;/advisories_p&lt;n&gt;.json</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">4</span><span class="phase">Load</span><span class="chip done">done</span></div>
+        <h3>Transform + upsert</h3>
+        <p class="desc">Map each raw record to rows, then upsert into Postgres. Idempotent on the identity pair — re-runs never duplicate.</p>
+        <p class="meta"><code>record_to_rows</code> → <code>on_conflict_do_update</code> on <span class="mono">(source, source_id)</span></p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">5</span><span class="phase">Store · curated</span><span class="chip done">done</span></div>
+        <h3>Postgres schema</h3>
+        <p class="desc">Two tables: advisories, and the affected packages hanging off each (one row per package × version range).</p>
+        <p class="meta"><code>advisories</code> 33,874 · <code>affected</code> 62,857 · indexed by (ecosystem, package)</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">6</span><span class="phase">Index · embed</span><span class="chip done">✓ just done</span></div>
+        <h3>Embed → pgvector</h3>
+        <p class="desc">Turn each advisory's <span class="mono">summary + description</span> into a 1,024-dim vector. Incremental — only new or changed rows re-embed.</p>
+        <p class="meta">Qwen3-Embedding-0.6B (local, on GPU) · marker: <span class="mono">updated_at &gt; embedded_at</span></p>
+      </div>
+
+      <div class="card now">
+        <div class="top"><span class="num mono">7</span><span class="phase">Index · query</span><span class="chip now">next ◀</span></div>
+        <h3>Retrieval</h3>
+        <p class="desc">Given a package or a question: filter <span class="mono">affected</span> to the relevant advisories, then rank them by vector cosine distance. Add an HNSW index for speed.</p>
+        <p class="meta">The "R" in RAG — this becomes the agent's input.</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">8</span><span class="phase">Reason</span><span class="chip later">Stage 4</span></div>
+        <h3>LLM agent</h3>
+        <p class="desc">Reads a project's dependencies + the retrieved advisories, reasons about real impact ("are we actually affected?"), and writes findings.</p>
+        <p class="meta">Retrieval feeds it · reasoning model would be Claude</p>
+      </div>
+
+      <div class="card">
+        <div class="top"><span class="num mono">9</span><span class="phase">Observe</span><span class="chip later">Stage 5</span></div>
+        <h3>Grafana + Prometheus</h3>
+        <p class="desc">Dashboards over both the pipeline's health and the security posture over time — one screen that shows the whole system alive.</p>
+        <p class="meta">Metrics emitted from each step</p>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--accent)"></i> built</span>
+      <span><i class="sw" style="background:var(--amber-line)"></i> active edge / next</span>
+      <span><i class="sw" style="background:var(--later)"></i> ahead (Stage 4–5)</span>
+    </div>
+    <p style="margin-top:14px">Next up: the retrieval function (steps 7) + an HNSW index — then Stage 4, the agent. Parked for after Stage 3: transform tests, OSV &amp; NVD sources.</p>
+  </footer>
+</div>
+
+<script>
+  (function(){
+    var btn=document.getElementById('themeBtn');
+    function cur(){
+      var s=document.documentElement.getAttribute('data-theme');
+      if(s) return s;
+      return window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+    }
+    btn.addEventListener('click',function(){
+      var next=cur()==='dark'?'light':'dark';
+      document.documentElement.setAttribute('data-theme',next);
+      btn.textContent = next==='dark' ? '◑' : '◐';
+    });
+  })();
+</script>
