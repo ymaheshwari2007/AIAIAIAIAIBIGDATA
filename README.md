@@ -18,15 +18,16 @@ Prometheus + Grafana arrive at Stage 5.
 
 - `depwatch/config.py` — reads all config from `.env` in one place (DB URL, MinIO settings, GitHub token).
 - `depwatch/storage/minio.py` — `miniIO` wrapper: ensure a bucket, write JSON objects.
-- `depwatch/storage/postgres.py` — the SQLAlchemy 2.0 ORM models (`Advisory`, `Affected`) that define the [schema](#schema) below, plus `upsert_advisory()` (idempotent write) and `session_scope()`.
+- `depwatch/storage/postgres.py` — the SQLAlchemy 2.0 ORM models (`Advisory`, `Affected`, `Project`, `Dependency`) that define the [schema](#schema) below, plus idempotent upserts (`upsert_advisory()`, `upsert_project()`) and `session_scope()`.
 - `depwatch/sources/ghsa.py` — the GitHub Advisories client: `fetch_advisories()` (paginates via the `Link` header), `ingest_raw()` (lands each page in MinIO), and `load_ghsa()` (reads raw MinIO JSON → normalizes → upserts into `advisories` + `affected`).
 - `depwatch/embedding/embed.py` — the Qwen3-Embedding-0.6B wrapper + `embed_new()`, which incrementally embeds any advisory that's new or changed since it was last embedded.
 - `depwatch/embedding/retrieve.py` — `search()`: filter-then-rank vector retrieval (restrict to a package, then rank by cosine similarity). This is the "R" in the Stage 4 agent's RAG.
 - `depwatch/embedding/service.py` — the host-side GPU launcher (Route B): a tiny FastAPI app the DAG POSTs to, so embedding runs on the Mac's GPU instead of in Docker.
 - `dags/ingest_ghsa.py` — the daily Airflow DAG: watermark → fetch new advisories → land in MinIO → load into Postgres → embed (via the launcher).
 - `dags/hellow_world.py` — a hello-world Airflow DAG, proving the orchestration runs.
+- **Stage 4 agent (in progress):** `depwatch/agent/repo.py` (shallow read-only clone), `depwatch/agent/deps.py` (OSV-SCALIBR extraction → parse PURLs), `depwatch/agent/match.py` (deterministic matching: indexed join + `univers` version-in-range → candidate findings). Next: 4c LLM triage + 4d triggers.
 
-The full daily pipeline — **fetch → land (MinIO) → load (Postgres) → embed (Mac GPU)** — runs unattended and idempotently. Next up is the Stage 4 agent that reads a repo's dependencies and reasons about real risk.
+The full daily pipeline — **fetch → land (MinIO) → load (Postgres) → embed (Mac GPU)** — runs unattended and idempotently. On top of it, the Stage 4 agent turns a repo URL into confirmed vulnerability findings: **clone → extract deps → match to advisories** works today (4a/4b); the LLM impact-triage (4c) and CLI/DAG triggers (4d) are next.
 
 ## Schema
 
