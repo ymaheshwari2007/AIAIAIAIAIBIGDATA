@@ -1,6 +1,7 @@
 alembic==1.18.5
 fastapi==0.141.1
 minio==7.2.20
+packageurl-python==0.17.6
 pgvector==0.5.0
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
