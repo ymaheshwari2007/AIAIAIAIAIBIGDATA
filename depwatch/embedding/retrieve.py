@@ -37,7 +37,9 @@ def search(
                          rank those by relevance ("are we affected, and which matters most?").
     """
     qvec = embed_query(query)
-    distance = Advisory.embedding.cosine_distance(qvec)  # build once, use in select + order
+    distance = Advisory.embedding.cosine_distance(
+        qvec
+    )  # build once, use in select + order
 
     with session_scope() as session:
         stmt = select(

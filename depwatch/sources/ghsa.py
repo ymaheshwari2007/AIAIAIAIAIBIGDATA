@@ -47,7 +47,9 @@ def fetch_advisories(updated_since: str | None = None) -> Iterator[list[dict]]:
     # follow GitHub's "next" cursor until it stops handing us one
     while "next" in resp.links:
         next_url = resp.links["next"]["url"]  # already carries per_page + cursor
-        resp = requests.get(next_url, headers=_headers())  # no params: they're in the url
+        resp = requests.get(
+            next_url, headers=_headers()
+        )  # no params: they're in the url
         resp.raise_for_status()
         yield resp.json()
 
@@ -68,7 +70,9 @@ def ingest_raw(updated_since: str | None = None, max_pages: int | None = None) -
     store.ensure_bucket()
 
     today = date.today().isoformat()
-    run = datetime.now().strftime("%H%M%S")  # per-run token: keeps runs from overwriting each other's pages
+    run = datetime.now().strftime(
+        "%H%M%S"
+    )  # per-run token: keeps runs from overwriting each other's pages
     pages = 0
     newest_updated: str | None = None
     for pages, page in enumerate(fetch_advisories(updated_since), start=1):

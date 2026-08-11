@@ -5,13 +5,14 @@ thing that touches the model; the embed job (`embed_new`) uses it plus the DB.
 """
 
 from __future__ import annotations
+
 from datetime import datetime, timezone
 
 import torch
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select, update
 
-from depwatch.storage.postgres import session_scope, Advisory
+from depwatch.storage.postgres import Advisory, session_scope
 
 MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 EMBED_DIM = 1024
@@ -40,31 +41,34 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     vectors = get_model().encode(texts, batch_size=32, normalize_embeddings=True)
     return vectors.tolist()
 
-def embed_new(batch_size:int = 200) -> int:
-  total = 0
-  while True:
-    with session_scope() as session:
-      rows = session.execute(
-        select(Advisory.id,Advisory.summary, Advisory.description)
-        .where (
-          (Advisory.embedding.is_(None)) | (Advisory.updated_at > Advisory.embedded_at)
-        ).limit(batch_size)
-      ).all()
 
-      if not rows:
-        return total
-      
-      texts = [f"{s or ''}\n{d or ''}" for _id, s, d in rows]
-      vectors = embed_texts(texts)
-      now = datetime.now(timezone.utc)
-      session.execute(
-          update(Advisory),
-          [
-              {"id": row.id, "embedding": vec, "embedded_at": now}
-              for row, vec in zip(rows, vectors)
-          ],
-      )
-      total += len(rows)
+def embed_new(batch_size: int = 200) -> int:
+    total = 0
+    while True:
+        with session_scope() as session:
+            rows = session.execute(
+                select(Advisory.id, Advisory.summary, Advisory.description)
+                .where(
+                    (Advisory.embedding.is_(None))
+                    | (Advisory.updated_at > Advisory.embedded_at)
+                )
+                .limit(batch_size)
+            ).all()
+
+            if not rows:
+                return total
+
+            texts = [f"{s or ''}\n{d or ''}" for _id, s, d in rows]
+            vectors = embed_texts(texts)
+            now = datetime.now(timezone.utc)
+            session.execute(
+                update(Advisory),
+                [
+                    {"id": row.id, "embedding": vec, "embedded_at": now}
+                    for row, vec in zip(rows, vectors)
+                ],
+            )
+            total += len(rows)
 
 
 if __name__ == "__main__":
@@ -74,4 +78,3 @@ if __name__ == "__main__":
     import json
 
     print(json.dumps({"embedded": embed_new()}))
-

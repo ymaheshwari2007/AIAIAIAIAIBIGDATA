@@ -39,10 +39,15 @@ def version_in_range(scheme: str, version: str, vulnerable_range: str) -> bool |
     try:
         rng = build_range_from_github_advisory_constraint(scheme, vulnerable_range)
         return rng.version_class(version) in rng
-    except Exception as exc:  # univers raises various errors on unknown scheme / bad input
+    except (
+        Exception
+    ) as exc:  # univers raises various errors on unknown scheme / bad input
         log.warning(
             "version_in_range unparseable: scheme=%s version=%r range=%r (%s)",
-            scheme, version, vulnerable_range, exc,
+            scheme,
+            version,
+            vulnerable_range,
+            exc,
         )
         return None
 
@@ -55,7 +60,9 @@ def match_project(session: Session, project_id: int) -> list[dict]:
     then univers filters by version. No persistence — that's 4c's `findings` table.
     """
     # match our PURL-type ecosystem to GHSA's spelling inside the join
-    advisory_eco = case(ECOSYSTEM_MAP, value=Dependency.ecosystem, else_=Dependency.ecosystem)
+    advisory_eco = case(
+        ECOSYSTEM_MAP, value=Dependency.ecosystem, else_=Dependency.ecosystem
+    )
 
     stmt = (
         select(

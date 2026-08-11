@@ -16,7 +16,9 @@ from pathlib import Path
 from packageurl import PackageURL
 
 # Where the scalibr binary lives. Overridable so the Docker image can point elsewhere later.
-SCALIBR_BIN = os.environ.get("DEPWATCH_SCALIBR_BIN", os.path.expanduser("~/go/bin/scalibr"))
+SCALIBR_BIN = os.environ.get(
+    "DEPWATCH_SCALIBR_BIN", os.path.expanduser("~/go/bin/scalibr")
+)
 
 
 def run_scalibr(repo_path: Path) -> dict:

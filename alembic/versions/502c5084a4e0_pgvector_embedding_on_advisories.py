@@ -5,16 +5,17 @@ Revises: 6ec38f936a6a
 Create Date: 2026-08-01 15:04:11.999030
 
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '502c5084a4e0'
-down_revision: Union[str, Sequence[str], None] = '6ec38f936a6a'
+revision: str = "502c5084a4e0"
+down_revision: Union[str, Sequence[str], None] = "6ec38f936a6a"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

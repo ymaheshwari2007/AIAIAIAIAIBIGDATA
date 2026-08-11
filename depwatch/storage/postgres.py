@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ForeignKey,
     Index,
@@ -33,7 +34,6 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
-from pgvector.sqlalchemy import Vector
 
 from depwatch import config
 
@@ -135,7 +135,7 @@ class Project(Base):
 
     # identity: the repo URL (see UNIQUE below)
     url: Mapped[str] = mapped_column(Text)
-    name: Mapped[str | None] = mapped_column(Text)              # owner/repo, derived from the URL
+    name: Mapped[str | None] = mapped_column(Text)  # owner/repo, derived from the URL
     commit_sha: Mapped[str | None] = mapped_column(String(40))  # the commit we scanned
     last_scanned_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
@@ -161,10 +161,12 @@ class Dependency(Base):
         ForeignKey("projects.id", ondelete="CASCADE")
     )
 
-    ecosystem: Mapped[str] = mapped_column(String(50))     # PURL type: npm, pypi, ...
-    package_name: Mapped[str] = mapped_column(Text)        # scoped name, e.g. @alloc/quick-lru
-    version: Mapped[str | None] = mapped_column(Text)      # resolved/pinned version
-    purl: Mapped[str | None] = mapped_column(Text)         # full PURL, kept for provenance
+    ecosystem: Mapped[str] = mapped_column(String(50))  # PURL type: npm, pypi, ...
+    package_name: Mapped[str] = mapped_column(
+        Text
+    )  # scoped name, e.g. @alloc/quick-lru
+    version: Mapped[str | None] = mapped_column(Text)  # resolved/pinned version
+    purl: Mapped[str | None] = mapped_column(Text)  # full PURL, kept for provenance
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now()
