@@ -18,7 +18,7 @@ This exists because the owners make every decision on this project. If you catch
 
 DepWatch is a small vulnerability intelligence platform. It ingests public security advisories every day, indexes them for semantic search, and uses an LLM agent to tell us which dependencies in our own projects are actually dangerous, whether we're realistically affected, and how long a finding has been open. Grafana monitors both the pipeline and the security posture over time.
 
-Think "scoped-down Snyk, built to learn the architecture." It is not a product, it has no customers, and it does not need to scale.
+Think "scoped-down Snyk, built for real." We're building toward a production-grade, likely hosted and multi-tenant service, and we architect with that in mind — while still building in stages, core engine first. It's also how the two of us learn data engineering and applied AI.
 
 ---
 
@@ -36,6 +36,8 @@ Full autonomous implementation is fine for: config files, Docker/compose setup, 
 
 Stop and ask before: schema changes, adding any new dependency/service/tool, changing the agent's prompt strategy, deciding anything marked OPEN or DEFERRED below, and anything touching more than ~3 files.
 
+**Default to plan mode; never edit in edit-only mode by default.** Start every task by planning. Do not make file edits or run state-changing commands (writes, installs, downloads, `docker`, migrations) until a plan is presented and the owners approve it. Leave plan mode / make changes only when the owners explicitly say to proceed — and only for what the approved plan covers. "Explain first" is the floor; plan-first-then-approve is the default.
+
 ---
 
 ## Decision Log
@@ -48,7 +50,7 @@ Everything here was chosen by the owners. This is the source of truth.
 - Orchestration: Apache Airflow 3.x
 - Executor: LocalExecutor (tasks run in the scheduler; no Redis, no separate worker)
 - Database: two Postgres containers — `postgres` (Airflow metadata) and `appdb` (our `depwatch` app data, on host port `5433` since `5432` is often taken by a local Postgres). Kept separate so resetting our schema never disturbs Airflow.
-- Postgres images: app DB (`appdb`) on `pgvector/pgvector:pg16` (vector extension available, switched on at Stage 3); Airflow metadata on plain `postgres:16`
+- Postgres images: app DB (`appdb`) on `pgvector/pgvector:pg16` (vector extension enabled at Stage 3 — `advisories.embedding` is live); Airflow metadata on plain `postgres:16`
 - Vector store: pgvector, inside the `depwatch` database (not a separate vector DB)
 - DB access layer: SQLAlchemy 2.0 ORM (declarative models); idempotent writes use Core-style `insert().on_conflict_do_update()`
 - Migrations: Alembic
@@ -60,14 +62,19 @@ Everything here was chosen by the owners. This is the source of truth.
 - Trivy: validation benchmark and container scanner ONLY, never the matching engine
 - Packaging: Docker Compose, built up incrementally (add a service only when the current stage needs it)
 - App schema (Stage 2): two tables — `advisories` (one row per `(source, source_id)`) and `affected` (child, one row per package × version range, FK to advisories with `ON DELETE CASCADE`). Package identity (`ecosystem` + `package_name`) lives as columns on `affected`, NOT a separate `packages` table (promote to a 3-table many-to-many later only if needed). `cwes` is a `text[]` array column; `cve_id` is a single nullable column. Cross-source dedup is a MERGE-step concern, not ingest — both GHSA and OSV rows are kept (that's why the key is the pair). Provenance trimmed to a single `url`. No pgvector column yet (Stage 3). Diagram in the README "Schema" section; models in `depwatch/storage/postgres.py`.
+- Embedding model (Stage 3, DECIDED): Qwen3-Embedding-0.6B — local, free, Apache-2.0, 1024-dim. Chosen over paid APIs (OpenAI etc.) and heavier models (NV-Embed-v2, bge) to stay local, free, and laptop-friendly (runs on the Mac GPU in seconds). Advisory `summary + description` is embedded into an `advisories.embedding` `Vector(1024)` column; `embedded_at` drives incremental re-embedding. Retrieval is filter-then-rank (SQL package filter on `affected` → vector cosine rank) with an HNSW index. Code in `depwatch/embedding/`.
+- Embedding runtime (Stage 3, DECIDED): "Route B" — embeddings run on the Mac's GPU (Metal/MPS) via a small host-side FastAPI launcher (`depwatch/embedding/service.py`), NOT inside Docker (containers can't reach the Mac GPU). The Airflow `embed` task POSTs to it; the launcher spawns a run-and-exit subprocess so the model only occupies RAM during a run. Kept alive by a macOS launchd LaunchAgent.
+- Agent design (Stage 4, AGREED — both owners): (1) **local agent first, hosted multi-tenant later** — the hosted "submit your repo" service is now an agreed target (see "Production target"), still sequenced after the core engine works; (2) **deterministic matching in code** (version-range checks + retrieval), **LLM only for judgment** ("given how it's used, are we really affected?") — keeps cost/latency low; (3) **provider-agnostic `reason()` interface + BYO-key**, default **Gemini 3 Flash free tier**, swappable to GitHub Models / Groq / Claude / GPT via `.env`; (4) entry point = **paste a repo URL → shallow read-only clone → extract deps → parse**. NEVER execute code from a scanned repo. Built in sub-stages 4a–4d.
+- Dependency extraction (Stage 4, DECIDED): **OSV-SCALIBR** (Google's `scalibr` CLI), chosen after research over Syft / dparse / cdxgen for tightest OSV alignment (our vuln data is OSV/GHSA), polyglot coverage, and extraction-only focus. Emits SPDX v2.3 JSON with PURLs; we parse those and normalize to our `affected.ecosystem` spelling. CPU-only binary (no GPU/launcher): runs from the host venv while building, baked into the Docker image when triage joins a DAG. (Prod: for connected GitHub repos, the GitHub dependency-graph SBOM API replaces cloning — same `parse_spdx` downstream; see "Production target".)
+- Version matching (Stage 4b, DECIDED): **`univers`** (from the packageurl authors) parses GHSA's `vulnerable_range` per ecosystem via `build_range_from_github_advisory_constraint(scheme, range)` and checks membership. PURL types already equal univers scheme names, so version math needs no mapping; `ECOSYSTEM_MAP` (pypi→pip, golang→go, cargo→rust, gem→rubygems) maps PURL→GHSA spelling only for the SQL join. Matching = one indexed join (`ix_affected_ecosystem_package`) + univers filter; measured ~40 ms for 822 deps.
+- LLM triage (Stage 4c, DECIDED): candidate findings are **batched** into few LLM calls and **prioritized by severity** (critical/high first). Provider-agnostic `reason()` + BYO-key, default **Gemini 3 Flash** free tier, via the `google-genai` SDK. Findings + per-project memory persisted; idempotent (findings keyed by project×dependency×advisory).
 
 **OPEN (not yet decided, ask the owners before acting):**
 - Nothing outstanding right now. If a new fork appears, it lands here until the owners decide.
 
 **DEFERRED (decide when we reach the stage, not before):**
-- Embedding model (Stage 3): local free model vs paid API
-- Agent framework (Stage 4): raw SDK loop vs a framework like LangGraph
 - Which metrics and dashboards (Stage 5)
+- (Embedding model + agent design moved to DECIDED / AGREED PLAN above.)
 
 ---
 
@@ -163,8 +170,8 @@ If you're ever about to suggest "just call Trivy here" in place of our own retri
 - Plural snake_case table names: `advisories`, `projects`, `dependencies`, `findings`, `agent_memory`, `raw_ingest_log`.
 - Every table gets `created_at timestamptz default now()`, and `updated_at` where mutable.
 - Advisories carry `source` and `source_id` with a UNIQUE constraint on the pair (see idempotency above). A plain auto-increment `id` can serve as the primary key alongside it.
-- Schema changes go through Alembic migrations. Do not hardcode the pgvector embedding dimension until we pick the embedding model at Stage 3.
-- The Stage 2 schema is now designed and migrated (see the Decision Log and the README "Schema" section): `advisories` + `affected`. Future schema changes — new tables, and the pgvector column at Stage 3 — still go through Alembic and remain the owners' call; propose and advise, don't finalize tables on your own.
+- Schema changes go through Alembic migrations. The pgvector embedding dimension is now fixed at **1024** (Qwen3-Embedding-0.6B) — see the Decision Log.
+- Migrated in so far: the Stage 2 schema (`advisories` + `affected`) and the Stage 3 pgvector column (`advisories.embedding` 1024-dim + `embedded_at` + HNSW index). Stage 4 will add `projects`, `dependencies`, `findings`, `agent_memory` (owners' call). Future schema changes still go through Alembic and remain the owners' call; propose and advise, don't finalize tables on your own.
 
 ## Airflow conventions
 
@@ -202,36 +209,56 @@ Airflow UI at `localhost:8080` (login `airflow` / `airflow`). Grafana at `localh
 
 ## Roadmap
 
-Grouped as three phases across six stages. **Currently: Phase 1.**
+Grouped as three phases across six stages. **Currently: Phase 2, Stage 4 (the triage agent).** We're building toward production (see "Production target"), still in sequence.
 
-**Phase 1, data spine (Stages 0-2). CURRENT.**
+**Phase 1, data spine (Stages 0-2). ✅ DONE.**
 - Stage 0 — ✅ **done**: two-Postgres + Airflow LocalExecutor compose, `depwatch/config.py`, a hello-world DAG running green (`dags/hellow_world.py`), Alembic wired to `appdb`.
-- Stage 1 — 🔨 **in progress**: **Stage 1a ✅ done** — GHSA advisories → raw JSON in MinIO, run daily by `dags/ingest_ghsa.py` with a watermark (`depwatch/sources/ghsa.py` fetch/paginate + `ingest_raw`, via `depwatch/storage/minio.py`; HTTP via `requests`; raw objects keyed `github/dt=<ingest-date>/advisories_p<n>.json`). OSV client written by the partner (commit pending). **Stage 1b remaining:** load/normalize the raw advisories from MinIO into Postgres (`advisories` + `affected`) via upsert, then NVD enrichment. Done when fresh advisories land daily unattended and reruns never duplicate.
+- Stage 1 — ✅ **done (core)**: **Stage 1a** — GHSA advisories → raw JSON in MinIO, run daily by `dags/ingest_ghsa.py` with a watermark. **Stage 1b** — `record_to_rows` + `upsert_advisory` + `load_ghsa` load raw MinIO JSON → `advisories` + `affected` via upsert; **33,874 advisories / 62,857 affected** loaded, idempotent. *Parked:* `record_to_rows` pytest, the OSV source (partner), NVD enrichment.
 - Stage 2 — ✅ **done**: Postgres schema designed and migrated — `advisories` + `affected` (see the Decision Log and README "Schema"). Models in `depwatch/storage/postgres.py`, `alembic/env.py` wired to `Base.metadata`, migration `6ec38f936a6a` applied.
 
-**Phase 2, AI layer (Stages 3-4).**
-- Stage 3: pick the embedding model, embed into pgvector, build metadata-filtered retrieval (filter by ecosystem/package, then vector rank).
-- Stage 4: pick the agent framework, build the triage loop, structured findings, per-project memory. Done when pointing it at one of our repos gives a report that makes sense.
+**Phase 2, AI layer (Stages 3-4). CURRENT.**
+- Stage 3 — ✅ **done**: Qwen3-Embedding-0.6B (local, 1024-dim) embeds advisory text into `advisories.embedding`; incremental via `embedded_at`; filter-then-rank retrieval (`depwatch/embedding/retrieve.py` `search()`); HNSW index. Runs on the Mac GPU via the Route B host launcher + launchd. Migrations `502c5084a4e0` + `43c9f0a95612`. Committed `c283d66`.
+- Stage 4 — 🔨 **in progress**: the triage agent. **4a ✅** (clone+scalibr → parse PURLs → `projects`/`dependencies`, idempotent). **4b ✅** (indexed join + `univers` version-in-range → candidate findings; 155 real on HackBeanPot). **4c** (LLM judgment — batched + severity-prioritized, Gemini default, `findings`/`agent_memory` tables) and **4d** (CLI/DAG triggers + per-project memory) remaining.
 
 **Phase 3, observability (Stage 5).**
 - Prometheus instrumentation everywhere, Grafana dashboards. The owners pick the metrics. Done when one dashboard shows the whole system alive.
 
 **Stage 6, validation.** Trivy diff harness + container scanning, once there are findings to compare.
 
-Do not build ahead of the current stage. Flag later ideas instead of building them. Scope creep is the most likely way this project dies.
+Prepare for scale in our *choices*, but still build in *sequence*: don't build production infra (ECS, auth, multi-tenancy) before the core engine works. Flag later ideas and architect so they're not precluded — but finish the current stage first. Half-built infra with no working engine is the most likely way this project dies.
 
 ---
+
+## Production target (future — prepare for, don't build yet)
+
+Where this is headed once the core engine works. We build local-first, but nothing here should require a rewrite — just deployment. Local dev → production mapping:
+
+- **Orchestration:** Docker Compose → **ECS Fargate** (serverless containers; chosen over EKS — Kubernetes ops is overkill at our scale). Images in ECR, infra in Terraform/CDK.
+- **App DB:** `appdb` pgvector container → **RDS/Aurora Postgres** with the pgvector extension.
+- **Raw storage:** MinIO → **S3** (drop-in; we already use the S3 API).
+- **Batch pipeline:** Airflow LocalExecutor → **Amazon MWAA** (managed Airflow) or Airflow on ECS.
+- **Embeddings:** Route B Mac-GPU launcher → a **GPU embedding microservice** (GPU ECS task / SageMaker / serverless GPU), called over HTTP like Route B — or a paid embedding API if cheaper at our volume.
+- **Triage engine:** the `triage(repo_url)` function stays; interactive path becomes a **FastAPI service** behind an ALB; batch re-scans stay a scheduled task.
+- **Repo ingestion (hosted flow):** "Sign in with GitHub" (OAuth) for identity + a **GitHub App** the user installs on their chosen repos (least-privilege: Contents/Metadata/Dependency-graph read). The App's installation token reads each repo's **dependency-graph SBOM via API → NO cloning**, no untrusted code on our servers. `clone + scalibr` stays the adapter for local dev and any non-connected/arbitrary repo. Both front-ends feed the **same** `parse_spdx → match → triage` engine (the swappable extraction seam). NOTE: fine-grained tokens can't reach repos the user doesn't own, so the SBOM API only serves *connected* repos — hence the App-install model rather than "paste any URL."
+- **Untrusted repos (fallback clone path):** if we ever clone (dev, or non-GitHub), do it in a **sandboxed, ephemeral, egress-restricted task** — clone + `scalibr` only, **never execute repo code**, no secrets mounted.
+- **Multi-tenancy:** **GitHub OAuth** for auth (identity + repo access in one), per-user data isolation, rate limits/quotas, **BYO-key** so users fund their own LLM calls.
+- **Secrets:** `.env` → **Secrets Manager / SSM**.
+- **Observability:** self-run Prometheus+Grafana → **managed Prometheus + managed Grafana** (or CloudWatch).
+
+Aspirational and sequenced *after* the core stages — listed so today's choices stay production-compatible.
 
 ## Watched projects
 
 `projects/` holds the dependency files of the repos DepWatch monitors. First targets: ImpactTrail and Rainfall. Get ImpactTrail working end to end first, then add Rainfall.
 
-## Non-goals
+## Non-goals (for now) — future-prepared
 
-- No multi-tenant, auth, or user accounts.
-- Not real time; daily is fine and matches the sources.
-- Not big data by volume; we practice the patterns (idempotency, raw vs. curated, partitioning) at small scale on purpose.
-- Not trying to beat Dependabot or Snyk; prior art existing means the problem is real.
+We're building toward production, so some former "never"s are now "later, and we architect for them":
+
+- **Multi-tenant, auth, user accounts** — a future stage (the hosted "paste your repo" service). Not built yet, but we make choices that don't preclude it (stateless engine, config via env, per-tenant-ready schema). See "Production target (future)".
+- Not real time; daily batch is fine and matches the sources.
+- Not big data by volume *yet*; we build the patterns (idempotency, raw vs. curated, partitioning) so they scale cleanly when volume grows.
+- Not trying to beat Dependabot or Snyk on day one; prior art existing means the problem is real — we earn scale by shipping the core first.
 
 ## Definition of done for any task
 

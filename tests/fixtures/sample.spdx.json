@@ -1,0 +1,50 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "name": "FAKE_FIXTURE_FOR_TESTS",
+  "packages": [
+    {
+      "name": "main",
+      "SPDXID": "SPDXRef-Package-main",
+      "externalRefs": []
+    },
+    {
+      "name": "lodash",
+      "SPDXID": "SPDXRef-Package-lodash",
+      "versionInfo": "4.17.21",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/lodash@4.17.21"}
+      ]
+    },
+    {
+      "name": "quick-lru",
+      "SPDXID": "SPDXRef-Package-quick-lru",
+      "versionInfo": "5.2.0",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/%40alloc/quick-lru@5.2.0"}
+      ]
+    },
+    {
+      "name": "flask",
+      "SPDXID": "SPDXRef-Package-flask",
+      "versionInfo": "2.0.1",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:pypi/flask@2.0.1"}
+      ]
+    },
+    {
+      "name": "backend",
+      "SPDXID": "SPDXRef-Package-backend",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/%40rainfall/backend"}
+      ]
+    },
+    {
+      "name": "lodash",
+      "SPDXID": "SPDXRef-Package-lodash-dup",
+      "versionInfo": "4.17.21",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/lodash@4.17.21"}
+      ]
+    }
+  ]
+}

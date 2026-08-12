@@ -1,5 +1,7 @@
 from datetime import datetime
+
 from airflow.sdk import dag, task
+
 
 @dag(
     schedule=None,
@@ -7,12 +9,12 @@ from airflow.sdk import dag, task
     catchup=False,
     tags=["stage0", "hello"],
 )
-
 def helloword():
-  @task
-  def sayhello():
-    print("hellow from this device just tryying shiiiiiiits")
-  
-  sayhello()
+    @task
+    def sayhello():
+        print("hellow from this device just tryying shiiiiiiits")
+
+    sayhello()
+
 
 helloword()

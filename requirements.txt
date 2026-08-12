@@ -1,6 +1,14 @@
 alembic==1.18.5
+fastapi==0.141.1
 minio==7.2.20
+packageurl-python==0.17.6
+pgvector==0.5.0
 psycopg2-binary==2.9.12
+pytest==9.1.1
 python-dotenv==1.2.2
 requests==2.34.2
+sentence-transformers==5.6.1
 SQLAlchemy==2.0.51
+univers==32.0.1
+uvicorn==0.52.1
+ruff==0.16.2

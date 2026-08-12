@@ -25,6 +25,7 @@ x-airflow-common:
     PYTHONPATH: '/opt/airflow'          # so DAGs can `import depwatch`
     DEPWATCH_DATABASE_URL: "postgresql://${DEPWATCH_DB_USER:-depwatch}:${DEPWATCH_DB_PASSWORD:-root}@appdb:5432/${DEPWATCH_DB_NAME:-depwatch}"
     DEPWATCH_MINIO_ENDPOINT: minio:9000   # containers reach MinIO by service name (host uses localhost:9000)
+    DEPWATCH_EMBED_URL: http://host.docker.internal:8000/embed   # embed task POSTs here (host GPU launcher)
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
