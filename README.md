@@ -1,15 +1,15 @@
 # DepWatch
 
-A small vulnerability-intelligence platform we're building to learn data engineering and applied AI. It ingests public security advisories, indexes them, and (later) uses an LLM agent to flag which of our own dependencies are actually at risk.
+A vulnerability-intelligence platform. It ingests public security advisories, indexes them for semantic search, and uses an LLM agent to flag which of a repo's dependencies are actually at risk. We're building toward a production, likely hosted service — in stages, core engine first — and learning data engineering + applied AI along the way.
 
-Built in stages. **Right now: Stage 2 just landed** — the app schema (`advisories` + `affected`) is designed and live in Postgres (see [Schema](#schema)). Already done: **Stage 0** (Airflow + Postgres + Alembic) and **Stage 1a** (GHSA advisories → raw JSON in MinIO, run daily by an Airflow DAG). **Next:** Stage 1b — loading the raw advisories from MinIO into these tables.
+Built in stages. **Right now: Stage 4 (the triage agent) is in progress.** Done so far: **Stage 0** (Airflow + Postgres + Alembic), **Stage 1** (GHSA advisories → raw JSON in MinIO daily, then loaded into `advisories` + `affected` — ~34k advisories), **Stage 2** (the app schema, see [Schema](#schema)), and **Stage 3** (semantic embeddings + vector retrieval, running on the Mac GPU — see [Embeddings & retrieval](#embeddings--retrieval-stage-3)). **Next:** Stage 4 — paste a repo URL → **OSV-SCALIBR** extracts its dependencies → deterministic version-matching → an LLM judges which are actually at risk.
 
 ## What's running
 
 - **Apache Airflow 3.3.0** (LocalExecutor) — api-server, scheduler, dag-processor, triggerer. UI at `localhost:8080`.
 - **Two Postgres containers:**
   - `postgres` (Postgres 16) — Airflow's own metadata.
-  - `appdb` (Postgres 16 + pgvector) — our `depwatch` database, reachable at `localhost:5433`. Under Alembic migration control; now holds the `advisories` and `affected` tables (see [Schema](#schema)), still empty until the Stage 1b loader runs.
+  - `appdb` (Postgres 16 + pgvector) — our `depwatch` database, reachable at `localhost:5433`. Under Alembic migration control; holds the `advisories` and `affected` tables (see [Schema](#schema)), loaded with ~34k advisories, each carrying a pgvector embedding for semantic search.
 - **MinIO** (S3-compatible object storage) — the raw landing zone for untouched advisory JSON. Console at `localhost:9001`.
 
 Prometheus + Grafana arrive at Stage 5.
@@ -18,12 +18,16 @@ Prometheus + Grafana arrive at Stage 5.
 
 - `depwatch/config.py` — reads all config from `.env` in one place (DB URL, MinIO settings, GitHub token).
 - `depwatch/storage/minio.py` — `miniIO` wrapper: ensure a bucket, write JSON objects.
-- `depwatch/storage/postgres.py` — the SQLAlchemy 2.0 ORM models (`Advisory`, `Affected`) that define the [schema](#schema) below.
-- `depwatch/sources/ghsa.py` — the GitHub Advisories client: `fetch_advisories()` (paginates the API via the `Link` header) and `ingest_raw()` (fetches + lands each page into MinIO).
-- `dags/ingest_ghsa.py` — the daily Airflow DAG: read a watermark → fetch new advisories → land them in MinIO → save the new watermark.
+- `depwatch/storage/postgres.py` — the SQLAlchemy 2.0 ORM models (`Advisory`, `Affected`, `Project`, `Dependency`) that define the [schema](#schema) below, plus idempotent upserts (`upsert_advisory()`, `upsert_project()`) and `session_scope()`.
+- `depwatch/sources/ghsa.py` — the GitHub Advisories client: `fetch_advisories()` (paginates via the `Link` header), `ingest_raw()` (lands each page in MinIO), and `load_ghsa()` (reads raw MinIO JSON → normalizes → upserts into `advisories` + `affected`).
+- `depwatch/embedding/embed.py` — the Qwen3-Embedding-0.6B wrapper + `embed_new()`, which incrementally embeds any advisory that's new or changed since it was last embedded.
+- `depwatch/embedding/retrieve.py` — `search()`: filter-then-rank vector retrieval (restrict to a package, then rank by cosine similarity). This is the "R" in the Stage 4 agent's RAG.
+- `depwatch/embedding/service.py` — the host-side GPU launcher (Route B): a tiny FastAPI app the DAG POSTs to, so embedding runs on the Mac's GPU instead of in Docker.
+- `dags/ingest_ghsa.py` — the daily Airflow DAG: watermark → fetch new advisories → land in MinIO → load into Postgres → embed (via the launcher).
 - `dags/hellow_world.py` — a hello-world Airflow DAG, proving the orchestration runs.
+- **Stage 4 agent (in progress):** `depwatch/agent/repo.py` (shallow read-only clone), `depwatch/agent/deps.py` (OSV-SCALIBR extraction → parse PURLs), `depwatch/agent/match.py` (deterministic matching: indexed join + `univers` version-in-range → candidate findings). Next: 4c LLM triage + 4d triggers.
 
-The GHSA → MinIO ingestion runs daily on a schedule, and the curated tables are designed and migrated (below). Next up is the Stage 1b loader that reads the raw MinIO JSON and upserts it into `advisories` + `affected`.
+The full daily pipeline — **fetch → land (MinIO) → load (Postgres) → embed (Mac GPU)** — runs unattended and idempotently. On top of it, the Stage 4 agent turns a repo URL into confirmed vulnerability findings: **clone → extract deps → match to advisories** works today (4a/4b); the LLM impact-triage (4c) and CLI/DAG triggers (4d) are next.
 
 ## Schema
 
@@ -48,6 +52,8 @@ erDiagram
         timestamptz source_updated_at
         timestamptz withdrawn_at
         text url
+        vector embedding "Qwen3 1024-dim (pgvector)"
+        timestamptz embedded_at
         timestamptz created_at
         timestamptz updated_at
     }
@@ -64,7 +70,7 @@ erDiagram
 
 - **`advisories`** — one row per source's view of a vulnerability. `UNIQUE(source, source_id)` is the idempotency key: re-ingesting upserts instead of duplicating. The same vuln from GHSA and OSV is kept as *two* rows on purpose (different `source`); a later merge step reconciles them.
 - **`affected`** — the packages a vuln hits, one row per package × version range. FK to `advisories` with `ON DELETE CASCADE`. `UNIQUE(advisory_id, ecosystem, package_name, vulnerable_range)` keeps re-ingest idempotent; `INDEX(ecosystem, package_name)` powers the "are we affected?" lookup.
-- The pgvector embedding column is deliberately **not** here yet — it's added at Stage 3 once we pick the embedding model.
+- **`advisories.embedding`** (`Vector(1024)`) — a Qwen3-Embedding-0.6B vector of each advisory's text, added at Stage 3, with an **HNSW** index for fast cosine similarity; `embedded_at` drives incremental re-embedding. This is what powers semantic retrieval (see [Embeddings & retrieval](#embeddings--retrieval-stage-3)).
 
 ## Prerequisites
 
@@ -122,6 +128,28 @@ With MinIO up and your token in `.env`, land some real advisories from the host 
 - Objects land under `raw-advisories/github/dt=<today>/run=<HHMMSS>/advisories_p<N>.json` — one object per page, partitioned by the day *and the run*, so two runs on the same day never overwrite each other (raw stays append-only).
 - See them: open the MinIO console at `localhost:9001` (`minioadmin` / `minioadmin`) → `raw-advisories` bucket.
 
+## Embeddings & retrieval (Stage 3)
+
+Each advisory's text (`summary + description`) is turned into a 1024-dimension vector by **Qwen3-Embedding-0.6B** (a local, free, open model) and stored in the `advisories.embedding` pgvector column. Semantic search then means: embed a query, and find the advisories whose vectors are closest (cosine distance), accelerated by an **HNSW** index. `depwatch/embedding/retrieve.py`'s `search()` does *filter-then-rank* — narrow to a package first, then rank by similarity — which is what the Stage 4 agent will use.
+
+**Why a host GPU launcher ("Route B").** Embedding is much faster on the Mac's GPU (Metal), but Docker containers can't reach it. So instead of embedding inside Airflow, a tiny FastAPI app runs **on your Mac** (`depwatch/embedding/service.py`); the DAG's `embed` task just POSTs to it, and the launcher spawns a short-lived process that loads the model on the GPU, embeds whatever's new, writes it back, and exits (freeing the RAM). The container stays lean — no torch, no model.
+
+Run the launcher on your machine (it's what the DAG calls):
+
+```bash
+.venv/bin/uvicorn depwatch.embedding.service:app --host 0.0.0.0 --port 8000
+```
+
+On macOS it's kept running automatically by a launchd LaunchAgent (`~/Library/LaunchAgents/com.depwatch.embed-launcher.plist`, `RunAtLoad` + `KeepAlive`), so it survives logout/restart. Embed manually or search from the host venv:
+
+```bash
+# embed any advisories that are new/changed since last embed
+.venv/bin/python -c "from depwatch.embedding.embed import embed_new; print(embed_new())"
+
+# semantic search (optionally filtered to a package)
+.venv/bin/python -c "from depwatch.embedding.retrieve import search; print(search('remote code execution in a yaml parser', k=5))"
+```
+
 ## Use it
 
 - **Airflow UI** → <http://localhost:8080>, login `airflow` / `airflow`.
@@ -159,9 +187,13 @@ docker-compose.yaml     the whole stack (postgres, appdb, minio, airflow)
 dags/                   Airflow DAGs (thin orchestration only)
 depwatch/               the importable library — the real logic:
   config.py               all env/config read here
-  sources/ghsa.py         GitHub Advisories client + raw ingest
+  sources/ghsa.py         GitHub Advisories client + raw ingest + load_ghsa
   storage/minio.py        MinIO (object storage) wrapper
   storage/postgres.py     SQLAlchemy ORM models -> advisories, affected
+  embedding/embed.py      Qwen3 embedder + incremental embed_new()
+  embedding/retrieve.py   search(): filter-then-rank vector retrieval
+  embedding/service.py    host GPU launcher (Route B) the DAG POSTs to
+  agent/                  Stage 4 triage agent (in progress)
 alembic/                database migrations (+ alembic.ini at the root)
 requirements.txt        host Python deps (requests, minio, Alembic, SQLAlchemy, ...)
 .env.example            copy to .env (and add your GitHub token)
