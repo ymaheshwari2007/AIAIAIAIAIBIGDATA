@@ -62,9 +62,7 @@ class _FakeMiniIO:
 
 def test_fetch_dump_parses_zip_contents(monkeypatch):
     zip_bytes = _make_zip({"OSV-2026-0001.json": FAKE_ADVISORY_FOR_TESTS})
-    monkeypatch.setattr(
-        osv.requests, "get", lambda url: _FakeResponse(zip_bytes)
-    )
+    monkeypatch.setattr(osv.requests, "get", lambda url: _FakeResponse(zip_bytes))
 
     records = osv.fetch_dump("PyPI")
 
@@ -86,7 +84,9 @@ def test_fetch_dumps_yields_ecosystem_pairs(monkeypatch):
         "PyPI": [FAKE_ADVISORY_FOR_TESTS],
         "npm": [{"id": "OSV-2026-0002", "summary": "Another fake advisory"}],
     }
-    monkeypatch.setattr(osv, "fetch_dump", lambda ecosystem: data_by_ecosystem[ecosystem])
+    monkeypatch.setattr(
+        osv, "fetch_dump", lambda ecosystem: data_by_ecosystem[ecosystem]
+    )
 
     result = list(osv.fetch_dumps(["PyPI", "npm"]))
 
@@ -103,7 +103,9 @@ def test_ingest_raw_writes_one_object_per_ecosystem(monkeypatch):
     }
     fake_store = _FakeMiniIO()
     monkeypatch.setattr(osv, "miniIO", lambda: fake_store)
-    monkeypatch.setattr(osv, "fetch_dump", lambda ecosystem: data_by_ecosystem[ecosystem])
+    monkeypatch.setattr(
+        osv, "fetch_dump", lambda ecosystem: data_by_ecosystem[ecosystem]
+    )
 
     count = osv.ingest_raw(["PyPI", "npm"])
 
@@ -172,7 +174,9 @@ def test_load_osv_reads_and_upserts_every_record(monkeypatch):
     monkeypatch.setattr(
         osv,
         "upsert_advisory",
-        lambda session, advisory, affected: upsert_calls.append((session, advisory, affected)),
+        lambda session, advisory, affected: upsert_calls.append(
+            (session, advisory, affected)
+        ),
     )
 
     result = osv.load_osv(dt="2026-09-09")

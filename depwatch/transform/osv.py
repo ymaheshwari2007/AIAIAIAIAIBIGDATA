@@ -48,7 +48,9 @@ def _events_to_intervals(events: list[dict]) -> list[tuple[str | None, str | Non
         if "introduced" in event:
             introduced = event["introduced"]
         elif "fixed" in event or "last_affected" in event:
-            intervals.append((introduced, event.get("fixed") or event.get("last_affected")))
+            intervals.append(
+                (introduced, event.get("fixed") or event.get("last_affected"))
+            )
             introduced = None
     if introduced is not None:
         intervals.append((introduced, None))
@@ -103,7 +105,9 @@ def record_to_rows(record: dict) -> tuple[dict, list[dict]]:
     }
 
     affected = []
-    seen_keys = set()  # some records list the same package/range more than once (OSV data quirk);
+    seen_keys = (
+        set()
+    )  # some records list the same package/range more than once (OSV data quirk);
     # dedupe on exactly the columns the DB's UNIQUE(advisory_id, ecosystem, package_name,
     # vulnerable_range) constraint checks, or a repeated pair crashes the upsert.
     for entry in record.get("affected") or []:
@@ -112,9 +116,11 @@ def record_to_rows(record: dict) -> tuple[dict, list[dict]]:
 
         for vuln_range in entry.get("ranges") or []:
             if vuln_range.get("type") == "GIT":
-                continue  
+                continue
 
-            for introduced, fixed in _events_to_intervals(vuln_range.get("events") or []):
+            for introduced, fixed in _events_to_intervals(
+                vuln_range.get("events") or []
+            ):
                 row_ecosystem = ecosystem.lower() if ecosystem else None
                 row_package_name = package.get("name")
                 row_vulnerable_range = _interval_to_range(introduced, fixed)

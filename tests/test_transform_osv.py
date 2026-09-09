@@ -99,7 +99,10 @@ PYSEC_NATIVE_RECORD = {
         {
             "package": {"name": "trac", "ecosystem": "PyPI", "purl": "pkg:pypi/trac"},
             "ranges": [
-                {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.10"}]}
+                {
+                    "type": "ECOSYSTEM",
+                    "events": [{"introduced": "0"}, {"fixed": "0.10"}],
+                }
             ],
             "database_specific": {
                 "source": "https://github.com/pypa/advisory-database/blob/main/vulns/trac/PYSEC-2005-1.yaml"
@@ -113,9 +116,18 @@ PYSEC_NATIVE_RECORD = {
         {"type": "ADVISORY", "url": "http://www.debian.org/security/2006/dsa-951"},
         {"type": "ADVISORY", "url": "http://secunia.com/advisories/18555"},
         {"type": "WEB", "url": "http://trac.edgewall.org/ticket/2473"},
-        {"type": "ADVISORY", "url": "http://www.vupen.com/english/advisories/2006/0226"},
-        {"type": "WEB", "url": "https://exchange.xforce.ibmcloud.com/vulnerabilities/24183"},
-        {"type": "ADVISORY", "url": "https://github.com/advisories/GHSA-6vhp-hp77-6w52"},
+        {
+            "type": "ADVISORY",
+            "url": "http://www.vupen.com/english/advisories/2006/0226",
+        },
+        {
+            "type": "WEB",
+            "url": "https://exchange.xforce.ibmcloud.com/vulnerabilities/24183",
+        },
+        {
+            "type": "ADVISORY",
+            "url": "https://github.com/advisories/GHSA-6vhp-hp77-6w52",
+        },
     ],
 }
 
@@ -206,13 +218,19 @@ def test_record_to_rows_dedupes_identical_affected_rows():
             {
                 "package": {"ecosystem": "PyPI", "name": "praisonai"},
                 "ranges": [
-                    {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "4.5.121"}]}
+                    {
+                        "type": "ECOSYSTEM",
+                        "events": [{"introduced": "0"}, {"fixed": "4.5.121"}],
+                    }
                 ],
             },
             {
                 "package": {"ecosystem": "PyPI", "name": "praisonai"},
                 "ranges": [
-                    {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "4.5.121"}]}
+                    {
+                        "type": "ECOSYSTEM",
+                        "events": [{"introduced": "0"}, {"fixed": "4.5.121"}],
+                    }
                 ],
             },
         ],
@@ -277,7 +295,10 @@ def test_primary_url_falls_back_to_osv_dev_link():
 
 
 def test_primary_url_falls_back_when_no_references_at_all():
-    assert _primary_url({"id": "OSV-TEST-0004"}) == "https://osv.dev/vulnerability/OSV-TEST-0004"
+    assert (
+        _primary_url({"id": "OSV-TEST-0004"})
+        == "https://osv.dev/vulnerability/OSV-TEST-0004"
+    )
 
 
 def test_events_to_intervals_pairs_multiple_disjoint_ranges():

@@ -25,7 +25,9 @@ def OSV():
     @task
     def load(dt: str):
         result = load_osv(dt)
-        print(f"loaded {result['advisories']} advisories from {result['pages']} object(s)")
+        print(
+            f"loaded {result['advisories']} advisories from {result['pages']} object(s)"
+        )
 
     @task
     def embed():
