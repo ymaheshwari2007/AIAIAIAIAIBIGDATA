@@ -3,12 +3,11 @@
 Docs: https://google.github.io/osv.dev/data/#zip-files
 """
 
-from collections.abc import Iterator
-from datetime import date
-
 import io
 import json
 import zipfile
+from collections.abc import Iterator
+from datetime import date
 
 import requests
 

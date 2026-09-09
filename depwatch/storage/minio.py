@@ -5,6 +5,7 @@ from minio import Minio
 
 from depwatch import config
 
+
 class miniIO:
     def __init__(self):
         settings = config.minio_settings()

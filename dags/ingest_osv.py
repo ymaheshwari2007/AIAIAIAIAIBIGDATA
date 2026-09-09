@@ -19,7 +19,7 @@ def OSV():
     @task
     def ingest():
         count = ingest_raw(ECOSYSTEMS)
-        # print(f"landed {count} ecosystem(s)")
+        print(f"landed {count} ecosystem(s)")
         return date.today().isoformat()
 
     @task

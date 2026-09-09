@@ -1,8 +1,8 @@
-import requests
-from depwatch import config
-import zipfile
 import io
 import json
+import zipfile
+
+import requests
 
 ECOSYSTEM = "PyPI"
 url = f"https://storage.googleapis.com/osv-vulnerabilities/{ECOSYSTEM}/all.zip"
